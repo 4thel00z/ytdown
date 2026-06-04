@@ -4,6 +4,7 @@
 //! Resolve media URLs into metadata and formats, select a format, download it.
 
 pub mod error;
+pub mod extractor;
 pub mod types;
 
 pub use error::{Error, Result};
