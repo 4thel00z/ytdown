@@ -45,6 +45,13 @@ pub struct VideoInfo {
     pub formats: Vec<Format>,
 }
 
+impl VideoInfo {
+    /// Entry point for fluent format selection over this video's [`Format`]s.
+    pub fn formats(&self) -> crate::format::FormatSelector<'_> {
+        crate::format::FormatSelector::new(&self.formats)
+    }
+}
+
 /// A single thumbnail image.
 #[derive(Debug, Clone, Serialize)]
 pub struct Thumbnail {
