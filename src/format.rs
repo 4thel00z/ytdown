@@ -154,13 +154,22 @@ impl<'a> FormatSelector<'a> {
     }
 
     /// Lowest-quality format available, preferring the smallest video then audio.
+    ///
+    /// Video-bearing formats are ranked below audio-only/unknown formats (a
+    /// leading `0` vs `1` category), so the smallest video is chosen whenever any
+    /// video format exists; audio-only is only returned when there is no video.
+    /// Within a category, ranking is by resolution/fps/bitrate (or bitrate for
+    /// audio), ascending.
     pub fn worst(&self) -> Result<&'a Format> {
         self.formats
             .iter()
             .copied()
             .min_by_key(|f| match f.kind() {
-                FormatKind::VideoOnly | FormatKind::Progressive => video_rank(f),
-                _ => (0, 0, f.bitrate.unwrap_or(0)),
+                FormatKind::VideoOnly | FormatKind::Progressive => {
+                    let (h, fps, br) = video_rank(f);
+                    (0u8, h, fps, br)
+                }
+                _ => (1u8, 0, 0, f.bitrate.unwrap_or(0)),
             })
             .ok_or_else(|| Error::FormatNotFound("worst".into()))
     }
@@ -326,6 +335,29 @@ mod tests {
             .best_video()
             .unwrap();
         assert_eq!(chosen.itag, Some(22));
+    }
+
+    #[test]
+    fn worst_picks_smallest_video_not_audio() {
+        // The mixed set has 1080/720/360 videos and two audio-only formats.
+        // worst() must return the smallest VIDEO (360p, itag 18), per its doc,
+        // not the lowest-bitrate audio-only format (itag 140).
+        let f = fixtures();
+        let sel = FormatSelector::new(&f);
+        let chosen = sel.worst().unwrap();
+        assert_eq!(chosen.itag, Some(18));
+    }
+
+    #[test]
+    fn worst_falls_back_to_audio_when_no_video() {
+        let f = fixtures();
+        let audio_only: Vec<Format> = f
+            .into_iter()
+            .filter(|fmt| matches!(fmt.kind(), FormatKind::AudioOnly))
+            .collect();
+        let sel = FormatSelector::new(&audio_only);
+        // Lowest-bitrate audio is itag 140 (128k).
+        assert_eq!(sel.worst().unwrap().itag, Some(140));
     }
 
     #[test]

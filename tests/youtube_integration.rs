@@ -74,16 +74,66 @@ async fn extracts_video_with_cipher_solving() {
         .iter()
         .find(|f| f.itag == Some(251))
         .expect("adaptive audio format present");
-    assert!(
-        adaptive.url.contains("sig="),
-        "cipher must be applied, got URL: {}",
+    // Assert the EXACT deciphered URL: the fixture's `s=0123456789` is run
+    // through the synthetic player's sig transform (reverse, splice(0,2), swap)
+    // which yields `67543210`. A no-op / broken cipher (echoing the raw `s`)
+    // would produce `?sig=0123456789` and fail this assertion — unlike a mere
+    // `contains("sig=")` check, which the hard-coded `sp` key would always pass.
+    assert_eq!(
+        adaptive.url, "https://r1.test/a.webm?sig=67543210",
+        "cipher must transform the signature, got URL: {}",
         adaptive.url
     );
-    assert!(
-        adaptive.url.starts_with("https://"),
-        "URL must be absolute, got: {}",
-        adaptive.url
-    );
+}
+
+#[tokio::test]
+async fn channel_handle_resolves_via_resolve_url_then_browses() {
+    let server = MockServer::start().await;
+
+    // The handle is resolved via navigation/resolve_url -> UC… browseId.
+    Mock::given(method("POST"))
+        .and(path("/youtubei/v1/navigation/resolve_url"))
+        .and(|req: &wiremock::Request| {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap_or_default();
+            body["url"] == "https://www.youtube.com/@SomeHandle"
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "endpoint": {
+                "browseEndpoint": { "browseId": "UCresolved00000000000000" }
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    // The uploads browse must then use the resolved UC… id, NOT "@handle".
+    Mock::given(method("POST"))
+        .and(path("/youtubei/v1/browse"))
+        .and(|req: &wiremock::Request| {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap_or_default();
+            body["browseId"] == "UCresolved00000000000000"
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            fixture("innertube/browse_playlist_page2.json"),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let extractor = YoutubeExtractor::with_base_url(server.uri());
+    let ctx = ExtractorContext::new(reqwest::Client::new());
+    let url = url::Url::parse("https://www.youtube.com/@SomeHandle").unwrap();
+
+    let info = extractor.extract(&ctx, &url).await.unwrap();
+    let collection = match info {
+        MediaInfo::Collection(c) => c,
+        other => panic!("expected collection, got {other:?}"),
+    };
+    let ids: Vec<String> = collection
+        .entries
+        .map(|r| r.expect("entry").id)
+        .collect()
+        .await;
+    assert_eq!(ids, vec!["ccccccccccc"]);
 }
 
 #[tokio::test]

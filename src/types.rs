@@ -112,6 +112,7 @@ pub struct AudioStream {
 
 /// Media container format.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub enum Container {
     /// MPEG-4 video container.
     Mp4,
@@ -129,6 +130,7 @@ pub enum Container {
 ///
 /// `Progressive` = muxed A+V; otherwise split streams.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FormatKind {
     /// Muxed video + audio.
     Progressive,
@@ -177,6 +179,7 @@ impl std::fmt::Debug for CollectionInfo {
 
 /// The kind of a collection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CollectionKind {
     /// An ordered playlist.
     Playlist,

@@ -17,6 +17,9 @@ use std::sync::OnceLock;
 pub(crate) struct SolvedPlayer {
     sig: crate::jsi::JsFunction,
     nsig: Option<crate::jsi::JsFunction>,
+    /// The `signatureTimestamp` scraped from the player JS, threaded into the
+    /// player request so ciphered (TV-embedded) formats are returned valid.
+    sts: Option<u64>,
 }
 
 /// Stateless extractor of cipher functions from player JavaScript.
@@ -40,47 +43,80 @@ impl PlayerSolver {
             None => None,
         };
 
-        Ok(SolvedPlayer { sig, nsig })
+        let sts = extract_signature_timestamp(player_js);
+
+        Ok(SolvedPlayer { sig, nsig, sts })
     }
 }
 
 impl SolvedPlayer {
     /// Solve a `signature`/`s` value.
-    pub fn solve_sig(&self, s: &str) -> crate::Result<String> {
-        self.sig.call_str(s)
+    ///
+    /// The CPU-bound JS evaluation runs on a blocking thread under a timeout (see
+    /// [`crate::jsi::JsFunction::call_str_async`]) so it never blocks the async
+    /// executor and cannot hang indefinitely on hostile player JS.
+    pub async fn solve_sig(&self, s: &str) -> crate::Result<String> {
+        self.sig.call_str_async(s).await
     }
 
     /// Solve an `n` (throttling) parameter value.
     ///
     /// Returns [`Error::Cipher`] if the player carried no recognizable `nsig`
-    /// function.
-    pub fn solve_n(&self, n: &str) -> crate::Result<String> {
+    /// function. Runs off the async executor under a timeout, like [`solve_sig`].
+    pub async fn solve_n(&self, n: &str) -> crate::Result<String> {
         match &self.nsig {
-            Some(f) => f.call_str(n),
+            Some(f) => f.call_str_async(n).await,
             None => Err(Error::Cipher("no nsig function in player".into())),
         }
     }
+
+    /// The `signatureTimestamp` scraped from the player JS, if present.
+    pub fn signature_timestamp(&self) -> Option<u64> {
+        self.sts
+    }
+}
+
+/// Scrape the `signatureTimestamp` (sts) value from the player JS.
+///
+/// Real players embed `signatureTimestamp:NNNNN` (or `sts:NNNNN`); the value is
+/// threaded into the player request so ciphered formats are returned valid.
+fn extract_signature_timestamp(js: &str) -> Option<u64> {
+    static STS_RE: OnceLock<Option<Regex>> = OnceLock::new();
+    let re = STS_RE
+        .get_or_init(|| Regex::new(r"(?:signatureTimestamp|sts)\s*:\s*([0-9]{4,})").ok())
+        .as_ref()?;
+    re.captures(js)?.get(1)?.as_str().parse().ok()
 }
 
 /// Extract the signature transform and re-emit it as standalone JS.
 ///
-/// Locates the function body of the form `a=a.split("");...;return a.join("")`,
-/// gathers every helper object it dereferences (`OBJ.method(...)`), inlines those
-/// `var OBJ={...};` declarations, and wraps the body in `function sig(a){...}`.
+/// Mirrors yt-dlp's strategy: first anchor on the *call site* that assigns the
+/// deciphered signature (e.g. `...set("signature", FN(decodeURIComponent(c)))`
+/// or `c=FN(decodeURIComponent(c))`) to learn the signature function's name,
+/// then resolve that named function's body. If no call site is found, fall back
+/// to scanning for a `function(a){a=a.split("")...return a.join("")}` body shape.
+///
+/// In all cases it gathers every helper object the body dereferences
+/// (`OBJ.method(...)`), inlines those `var OBJ={...};` declarations, and wraps the
+/// body in `function sig(a){...}`.
 fn extract_sig_source(js: &str) -> Option<String> {
-    // The `regex` crate has no backreferences, so we can't assert
-    // "split into the same var that's joined" inside the pattern. Instead we
-    // locate every function header `... function (arg) {`, balance-match its body,
-    // and verify the split/join shape on `arg` in code.
-    static HEADER_RE: OnceLock<Option<Regex>> = OnceLock::new();
-    let header_re = HEADER_RE
-        .get_or_init(|| Regex::new(r"function\s*\(\s*([\w$]+)\s*\)\s*\{").ok())
-        .as_ref()?;
-
     // Helper-object reference matcher (`OBJ.method(`), built once.
     static HELPER_RE: OnceLock<Option<Regex>> = OnceLock::new();
     let helper_re = HELPER_RE
         .get_or_init(|| Regex::new(r"([\w$]+)\.[\w$]+\(").ok())
+        .as_ref()?;
+
+    // 1) Preferred: anchor on the call site to learn the sig function name, then
+    //    resolve its `function NAME(arg){...}` body.
+    if let Some((arg, inner)) = find_named_sig_function(js) {
+        return Some(emit_sig(js, &arg, &inner, helper_re));
+    }
+
+    // 2) Fallback: scan for an anonymous function whose body has the split/join
+    //    shape on its own argument.
+    static HEADER_RE: OnceLock<Option<Regex>> = OnceLock::new();
+    let header_re = HEADER_RE
+        .get_or_init(|| Regex::new(r"function\s*\(\s*([\w$]+)\s*\)\s*\{").ok())
         .as_ref()?;
 
     for caps in header_re.captures_iter(js) {
@@ -92,38 +128,101 @@ fn extract_sig_source(js: &str) -> Option<String> {
         };
         // body still includes the outer braces; strip them.
         let inner = &body[1..body.len() - 1];
-        let trimmed = inner.trim();
 
-        let split_prefix = format!(r#"{arg}={arg}.split("")"#);
-        let split_prefix_spaced = format!(r#"{arg} = {arg}.split("")"#);
-        let join_suffix = format!(r#"return {arg}.join("")"#);
-
-        let starts_ok =
-            trimmed.starts_with(&split_prefix) || trimmed.starts_with(&split_prefix_spaced);
-        let contains_join = trimmed.contains(&join_suffix);
-        if !(starts_ok && contains_join) {
+        if !body_has_split_join_shape(inner, arg) {
             continue;
         }
 
-        // Found the signature function body. Collect helper objects it references.
-        let mut emitted = String::new();
-        let mut seen: Vec<&str> = Vec::new();
-        for c in helper_re.captures_iter(inner) {
-            let obj = c.get(1).map(|g| g.as_str()).unwrap_or_default();
-            if obj == arg || obj.is_empty() || seen.contains(&obj) {
-                continue;
-            }
-            seen.push(obj);
-            if let Some(decl) = extract_var_object(js, obj) {
-                emitted.push_str(&decl);
-                emitted.push('\n');
-            }
-        }
-
-        return Some(format!("{emitted}function sig({arg}){{{inner}}}"));
+        return Some(emit_sig(js, arg, inner, helper_re));
     }
 
     None
+}
+
+/// Whether a function body splits and re-joins `arg` (the signature shape),
+/// tolerating leading statements and arbitrary whitespace around the
+/// `arg=arg.split("")` / `return arg.join("")` calls.
+fn body_has_split_join_shape(inner: &str, arg: &str) -> bool {
+    let normalized: String = inner.chars().filter(|c| !c.is_whitespace()).collect();
+    let split = format!(r#"{arg}={arg}.split("")"#);
+    let join = format!(r#"return{arg}.join("")"#);
+    normalized.contains(&split) && normalized.contains(&join)
+}
+
+/// Locate the signature function by name via its call site, returning
+/// `(arg, body_without_braces)`.
+///
+/// yt-dlp anchors signature extraction on the call site that assigns the decoded
+/// signature, e.g. `a.set("signature", FN(decodeURIComponent(c)))` or
+/// `c=FN(decodeURIComponent(c))`. We extract the named function `FN` and balance
+/// its body.
+fn find_named_sig_function(js: &str) -> Option<(String, String)> {
+    static CALLSITE_RE: OnceLock<Vec<Regex>> = OnceLock::new();
+    let patterns = CALLSITE_RE.get_or_init(|| {
+        [
+            // ...set("signature"|"sig", FN(...   /  ...set("signature", encodeURIComponent(FN(...
+            r#"\.set\(\s*"(?:signature|sig)"\s*,\s*(?:encodeURIComponent\s*\(\s*)?([A-Za-z0-9$]+)\("#,
+            // c&&(c=FN(decodeURIComponent(c)))   /  c=FN(decodeURIComponent(...
+            r#"[A-Za-z0-9$]\s*=\s*([A-Za-z0-9$]+)\(\s*decodeURIComponent\("#,
+            // c&&d.set(...,encodeURIComponent(FN(...
+            r#"&&\s*[A-Za-z0-9$]+\.set\([^,]+,\s*(?:encodeURIComponent\s*\(\s*)?([A-Za-z0-9$]+)\("#,
+        ]
+        .into_iter()
+        .filter_map(|p| Regex::new(p).ok())
+        .collect()
+    });
+
+    for re in patterns {
+        for caps in re.captures_iter(js) {
+            let Some(name) = caps.get(1).map(|m| m.as_str()) else {
+                continue;
+            };
+            // Reject known non-sig helpers grabbed by a loose call site.
+            if name == "decodeURIComponent" || name == "encodeURIComponent" {
+                continue;
+            }
+            if let Some((arg, inner)) = resolve_function_body(js, name) {
+                // Validate the shape so we don't wire up an unrelated function.
+                if body_has_split_join_shape(&inner, &arg) {
+                    return Some((arg, inner));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve a function named `name` (declared as `function NAME(arg){...}`,
+/// `var NAME=function(arg){...}`, or `NAME=function(arg){...}`) into
+/// `(arg, body_without_braces)`.
+fn resolve_function_body(js: &str, name: &str) -> Option<(String, String)> {
+    let decl_pos = find_function_decl(js, name)?;
+    let arg_start = js[decl_pos..].find('(')? + decl_pos;
+    let arg_end = js[arg_start..].find(')')? + arg_start;
+    let arg = js[arg_start + 1..arg_end].trim().to_string();
+    let brace_start = js[arg_end..].find('{')? + arg_end;
+    let body = balanced_braces(&js[brace_start..])?;
+    let inner = body[1..body.len() - 1].to_string();
+    Some((arg, inner))
+}
+
+/// Emit a self-contained `function sig(arg){...}` plus the helper object
+/// declarations the body references.
+fn emit_sig(js: &str, arg: &str, inner: &str, helper_re: &Regex) -> String {
+    let mut emitted = String::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for c in helper_re.captures_iter(inner) {
+        let obj = c.get(1).map(|g| g.as_str()).unwrap_or_default();
+        if obj == arg || obj.is_empty() || seen.contains(&obj) {
+            continue;
+        }
+        seen.push(obj);
+        if let Some(decl) = extract_var_object(js, obj) {
+            emitted.push_str(&decl);
+            emitted.push('\n');
+        }
+    }
+    format!("{emitted}function sig({arg}){{{inner}}}")
 }
 
 /// Extract `var NAME={...};` (or `NAME={...};`) with brace balancing.
@@ -163,16 +262,82 @@ fn find_object_decl(js: &str, name: &str) -> Option<usize> {
 
 /// Extract the `nsig` transform and re-emit it as standalone JS.
 ///
-/// Finds the single-element dispatch array `var TBL=[FN];`, then extracts the full
-/// source of `var FN=function(a){...}` and renames the wrapper to `nsig`.
+/// Mirrors yt-dlp's call-site anchoring: the `n` parameter is transformed via a
+/// single-element dispatch array indexed at the `n` call site, e.g.
+/// `a.set("n", TBL[0](c))`. We learn the dispatch array name `TBL` from that call
+/// site, resolve `var TBL=[FN];` to the function name `FN`, then extract `FN`'s
+/// body. This avoids the brittle "first single-element array in the file"
+/// heuristic, which a real minified base.js (full of unrelated single-element
+/// arrays) would defeat.
+///
+/// Falls back to scanning every single-element array (not just the first) and
+/// accepting the first whose element resolves to a function with a body.
 fn extract_nsig_source(js: &str) -> Option<String> {
+    let fn_name = find_nsig_function_name(js)?;
+    emit_nsig(js, &fn_name)
+}
+
+/// Resolve the nsig function name, preferring the dispatch array referenced at
+/// the `n` call site.
+fn find_nsig_function_name(js: &str) -> Option<String> {
     static TBL_RE: OnceLock<Option<Regex>> = OnceLock::new();
     let tbl_re = TBL_RE
-        .get_or_init(|| Regex::new(r"var\s+[\w$]+\s*=\s*\[\s*([\w$]+)\s*\]").ok())
+        .get_or_init(|| Regex::new(r"var\s+([\w$]+)\s*=\s*\[\s*([\w$]+)\s*\]").ok())
         .as_ref()?;
-    let fn_name = tbl_re.captures(js)?.get(1)?.as_str();
 
-    // FN = function(arg){ ... }  (capture the arg and body via brace balancing)
+    // 1) Preferred: find the array name used at the `n` call site (`TBL[idx](`),
+    //    then map that array to its element.
+    if let Some(arr_name) = find_nsig_dispatch_array(js) {
+        for caps in tbl_re.captures_iter(js) {
+            if caps.get(1).map(|m| m.as_str()) == Some(arr_name.as_str()) {
+                if let Some(fname) = caps.get(2).map(|m| m.as_str().to_string()) {
+                    if find_function_decl(js, &fname).is_some() {
+                        return Some(fname);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2) Fallback: scan ALL single-element arrays and accept the first whose
+    //    element resolves to an actual function declaration.
+    for caps in tbl_re.captures_iter(js) {
+        if let Some(fname) = caps.get(2).map(|m| m.as_str().to_string()) {
+            if find_function_decl(js, &fname).is_some() {
+                return Some(fname);
+            }
+        }
+    }
+    None
+}
+
+/// Find the dispatch-array identifier indexed at the `n` parameter call site,
+/// e.g. the `nfd` in `a.set("n", nfd[0](c))` or `b=nfd[0](b)`.
+fn find_nsig_dispatch_array(js: &str) -> Option<String> {
+    static N_CALLSITE_RE: OnceLock<Vec<Regex>> = OnceLock::new();
+    let patterns = N_CALLSITE_RE.get_or_init(|| {
+        [
+            // ...set("n", TBL[idx](
+            r#"\.set\(\s*"n"\s*,\s*([A-Za-z0-9$]+)\[\d+\]\("#,
+            // x=TBL[idx](y) near an n-get, generic indexed dispatch call.
+            r#"=\s*([A-Za-z0-9$]+)\[\d+\]\([A-Za-z0-9$]+\)"#,
+        ]
+        .into_iter()
+        .filter_map(|p| Regex::new(p).ok())
+        .collect()
+    });
+    for re in patterns {
+        if let Some(caps) = re.captures(js) {
+            if let Some(name) = caps.get(1).map(|m| m.as_str().to_string()) {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// Emit a self-contained `function nsig(arg){...}` from the named function.
+fn emit_nsig(js: &str, fn_name: &str) -> Option<String> {
     let decl_pos = find_function_decl(js, fn_name)?;
     let arg_start = js[decl_pos..].find('(')? + decl_pos;
     let arg_end = js[arg_start..].find(')')? + arg_start;
@@ -249,7 +414,7 @@ pub(crate) async fn fetch_player_js(
 ) -> crate::Result<(String, String)> {
     let base = base.trim_end_matches('/');
     let iframe_url = format!("{base}/iframe_api");
-    let iframe = http
+    let iframe_resp = http
         .get(&iframe_url)
         .send()
         .await
@@ -261,13 +426,9 @@ pub(crate) async fn fetch_player_js(
         .map_err(|source| Error::Network {
             stage: "fetch_iframe_api",
             source,
-        })?
-        .text()
-        .await
-        .map_err(|source| Error::Network {
-            stage: "fetch_iframe_api",
-            source,
         })?;
+    let iframe_bytes = super::innertube::read_bounded(iframe_resp, "fetch_iframe_api").await?;
+    let iframe = String::from_utf8_lossy(&iframe_bytes).into_owned();
 
     static VER_RE: OnceLock<Option<Regex>> = OnceLock::new();
     let ver_re = VER_RE
@@ -285,7 +446,7 @@ pub(crate) async fn fetch_player_js(
         .to_string();
 
     let player_url = format!("{base}/s/player/{version}/player_ias.vflset/en_US/base.js");
-    let js = http
+    let js_resp = http
         .get(&player_url)
         .send()
         .await
@@ -297,13 +458,9 @@ pub(crate) async fn fetch_player_js(
         .map_err(|source| Error::Network {
             stage: "fetch_player_js",
             source,
-        })?
-        .text()
-        .await
-        .map_err(|source| Error::Network {
-            stage: "fetch_player_js",
-            source,
         })?;
+    let js_bytes = super::innertube::read_bounded(js_resp, "fetch_player_js").await?;
+    let js = String::from_utf8_lossy(&js_bytes).into_owned();
 
     Ok((version, js))
 }
@@ -315,7 +472,7 @@ pub(crate) async fn fetch_player_js(
 /// `{sp}={solved}` to the URL. For a direct URL (or after appending the signature),
 /// any `n` query parameter is replaced with its solved value when an `nsig`
 /// function is available.
-pub(crate) fn decipher_url(
+pub(crate) async fn decipher_url(
     raw: &super::innertube::RawFormat,
     player: &SolvedPlayer,
 ) -> crate::Result<String> {
@@ -334,7 +491,7 @@ pub(crate) fn decipher_url(
         let url = url.ok_or_else(|| Error::Cipher("signatureCipher missing url field".into()))?;
         let s = s.ok_or_else(|| Error::Cipher("signatureCipher missing s field".into()))?;
         let sp = sp.unwrap_or_else(|| "signature".to_string());
-        let solved = player.solve_sig(&s)?;
+        let solved = player.solve_sig(&s).await?;
         let sep = if url.contains('?') { '&' } else { '?' };
         format!("{url}{sep}{sp}={solved}")
     } else if let Some(url) = &raw.url {
@@ -345,11 +502,11 @@ pub(crate) fn decipher_url(
         ));
     };
 
-    transform_n_param(&base, player)
+    transform_n_param(&base, player).await
 }
 
 /// Replace an `n=` query parameter with its solved value, if present and solvable.
-fn transform_n_param(url: &str, player: &SolvedPlayer) -> crate::Result<String> {
+async fn transform_n_param(url: &str, player: &SolvedPlayer) -> crate::Result<String> {
     let mut parsed = match url::Url::parse(url) {
         Ok(p) => p,
         // Not absolute / unparseable: leave untouched rather than fail the format.
@@ -362,7 +519,7 @@ fn transform_n_param(url: &str, player: &SolvedPlayer) -> crate::Result<String> 
     let Some(n) = n else {
         return Ok(url.to_string());
     };
-    let solved = player.solve_n(&n)?;
+    let solved = player.solve_n(&n).await?;
     let pairs: Vec<(String, String)> = parsed
         .query_pairs()
         .map(|(k, v)| {
@@ -389,16 +546,40 @@ mod tests {
 
     const SYNTHETIC: &str = include_str!("../../../tests/fixtures/player/synthetic_player.js");
 
-    #[test]
-    fn extracts_and_solves_sig_from_synthetic_player() {
+    #[tokio::test]
+    async fn extracts_and_solves_sig_from_synthetic_player() {
         let player = PlayerSolver::from_js(SYNTHETIC).unwrap();
-        assert_eq!(player.solve_sig("0123456789").unwrap(), "67543210");
+        assert_eq!(player.solve_sig("0123456789").await.unwrap(), "67543210");
+    }
+
+    #[tokio::test]
+    async fn extracts_and_solves_nsig() {
+        let player = PlayerSolver::from_js(SYNTHETIC).unwrap();
+        assert_eq!(player.solve_n("abcdef").await.unwrap(), "kjihgf");
     }
 
     #[test]
-    fn extracts_and_solves_nsig() {
-        let player = PlayerSolver::from_js(SYNTHETIC).unwrap();
-        assert_eq!(player.solve_n("abcdef").unwrap(), "kjihgf");
+    fn nsig_extraction_ignores_decoy_arrays_via_call_site() {
+        // Regression for the "first single-element array wins" defect: decoy
+        // single-element arrays (`var aa=[za]`, `var ab=[zb]`) appear before the
+        // real nsig table `var nfd=[bna]`. The extractor must anchor on the `n`
+        // call site (`nfd[0](c)`) and resolve `bna`, not the decoys.
+        let name = find_nsig_function_name(SYNTHETIC).expect("nsig name resolved");
+        assert_eq!(name, "bna");
+        // The dispatch array is found from the call site, not the first array.
+        assert_eq!(find_nsig_dispatch_array(SYNTHETIC).as_deref(), Some("nfd"));
+    }
+
+    #[test]
+    fn sig_extraction_handles_leading_statement_via_call_site() {
+        // Regression for the brittle "body must start with a=a.split" heuristic:
+        // the real sig fn `ada` has a leading `var z=0;` before the split. The
+        // extractor anchors on the call site `set("signature", ada(...))` and
+        // resolves it anyway.
+        let src = extract_sig_source(SYNTHETIC).expect("sig source extracted");
+        // Must wire up the helper object `Ix` it references.
+        assert!(src.contains("var Ix="), "helper object inlined: {src}");
+        assert!(src.contains("function sig("), "wrapped as sig: {src}");
     }
 
     #[test]
@@ -407,8 +588,8 @@ mod tests {
         assert!(matches!(err, crate::Error::Cipher(_)));
     }
 
-    #[test]
-    fn parses_signature_cipher_param() {
+    #[tokio::test]
+    async fn parses_signature_cipher_param() {
         // A solved player that reverses the signature value.
         let reverse = crate::jsi::JsFunction::compile(
             r#"function sig(a){return a.split("").reverse().join("")}"#,
@@ -418,14 +599,15 @@ mod tests {
         let player = SolvedPlayer {
             sig: reverse,
             nsig: None,
+            sts: None,
         };
         let raw = raw_with_cipher("s=ABC&sp=sig&url=https%3A%2F%2Fr.test%2Fv");
-        let url = decipher_url(&raw, &player).unwrap();
+        let url = decipher_url(&raw, &player).await.unwrap();
         assert_eq!(url, "https://r.test/v?sig=CBA");
     }
 
-    #[test]
-    fn signature_cipher_default_sp_is_signature() {
+    #[tokio::test]
+    async fn signature_cipher_default_sp_is_signature() {
         let reverse = crate::jsi::JsFunction::compile(
             r#"function sig(a){return a.split("").reverse().join("")}"#,
             "sig",
@@ -434,29 +616,30 @@ mod tests {
         let player = SolvedPlayer {
             sig: reverse,
             nsig: None,
+            sts: None,
         };
         let raw = raw_with_cipher("s=ABC&url=https%3A%2F%2Fr.test%2Fv");
-        let url = decipher_url(&raw, &player).unwrap();
+        let url = decipher_url(&raw, &player).await.unwrap();
         assert_eq!(url, "https://r.test/v?signature=CBA");
     }
 
-    #[test]
-    fn direct_url_with_n_param_is_transformed() {
+    #[tokio::test]
+    async fn direct_url_with_n_param_is_transformed() {
         let player = PlayerSolver::from_js(SYNTHETIC).unwrap();
         let mut raw = raw_with_cipher("");
         raw.signature_cipher = None;
         raw.url = Some("https://r.test/v?id=1&n=abcdef".into());
-        let url = decipher_url(&raw, &player).unwrap();
+        let url = decipher_url(&raw, &player).await.unwrap();
         assert_eq!(url, "https://r.test/v?id=1&n=kjihgf");
     }
 
-    #[test]
-    fn direct_url_without_cipher_passes_through() {
+    #[tokio::test]
+    async fn direct_url_without_cipher_passes_through() {
         let player = PlayerSolver::from_js(SYNTHETIC).unwrap();
         let mut raw = raw_with_cipher("");
         raw.signature_cipher = None;
         raw.url = Some("https://r.test/v?id=1".into());
-        let url = decipher_url(&raw, &player).unwrap();
+        let url = decipher_url(&raw, &player).await.unwrap();
         assert_eq!(url, "https://r.test/v?id=1");
     }
 

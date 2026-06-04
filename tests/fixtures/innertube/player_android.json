@@ -32,7 +32,7 @@
     "adaptiveFormats": [
       {
         "itag": 251,
-        "signatureCipher": "s=AAA&sp=sig&url=https%3A%2F%2Fr1.test%2Fa.webm",
+        "signatureCipher": "s=0123456789&sp=sig&url=https%3A%2F%2Fr1.test%2Fa.webm",
         "mimeType": "audio/webm; codecs=\"opus\"",
         "bitrate": 160000,
         "audioSampleRate": "48000"

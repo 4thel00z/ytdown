@@ -21,6 +21,14 @@ pub(crate) enum PageKind {
     Search(String),
 }
 
+/// Maximum number of continuation pages fetched for a single collection.
+///
+/// A hard cap against an adversarial or buggy InnerTube response that keeps
+/// returning continuation tokens forever (including a token cycle). 10k pages of
+/// ~100 entries comfortably exceeds any real playlist/channel/search while
+/// bounding the work an iterate-to-completion consumer can be made to do.
+const MAX_PAGES: u32 = 10_000;
+
 /// Per-step state threaded through the [`stream::unfold`] driving pagination.
 struct PageState {
     it: Arc<InnerTube>,
@@ -31,6 +39,10 @@ struct PageState {
     buffer: std::collections::VecDeque<Entry>,
     /// Whether the first (already-fetched) page still needs parsing.
     first_page: Option<Value>,
+    /// Number of continuation pages fetched so far (bounds infinite streams).
+    pages_fetched: u32,
+    /// Continuation tokens already seen, to break token cycles.
+    seen_tokens: std::collections::HashSet<String>,
 }
 
 /// Turn an initial browse/search response into a lazy entry stream.
@@ -49,6 +61,8 @@ pub(crate) fn entry_stream(
         next: None,
         buffer: std::collections::VecDeque::new(),
         first_page: Some(first_page),
+        pages_fetched: 0,
+        seen_tokens: std::collections::HashSet::new(),
     };
 
     let stream = stream::unfold(state, |mut state| async move {
@@ -68,6 +82,14 @@ pub(crate) fn entry_stream(
 
             // Fetch the next page only when there is a continuation token.
             let token = state.next.take()?;
+
+            // Bound total pages and break continuation-token cycles, defending
+            // against adversarial/buggy responses that paginate forever.
+            if state.pages_fetched >= MAX_PAGES || !state.seen_tokens.insert(token.clone()) {
+                return None;
+            }
+            state.pages_fetched += 1;
+
             let fetched = match &state.kind {
                 PageKind::Playlist | PageKind::Channel => {
                     state
@@ -272,5 +294,156 @@ mod tests {
             entries[2].duration,
             Some(std::time::Duration::from_secs(300))
         );
+    }
+
+    /// Regression for the unbounded-pagination defect: a response that always
+    /// returns the SAME continuation token (a token cycle) must terminate via
+    /// cycle detection instead of looping forever.
+    #[tokio::test]
+    async fn pagination_breaks_continuation_token_cycle() {
+        let server = MockServer::start().await;
+
+        // Every browse continuation returns one entry AND the same token again.
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/browse"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "onResponseReceivedActions": [{
+                    "appendContinuationItemsAction": {
+                        "continuationItems": [
+                            { "playlistVideoRenderer": { "videoId": "loopvideo00", "title": { "runs": [{ "text": "Loop" }] } } },
+                            { "continuationItemRenderer": { "continuationEndpoint": {
+                                "continuationCommand": { "token": "SAME_TOKEN" } } } }
+                        ]
+                    }
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let it = Arc::new(InnerTube::with_base_url(
+            reqwest::Client::new(),
+            server.uri(),
+        ));
+        // First page yields one entry and the looping token.
+        let first = serde_json::json!({
+            "contents": { "x": [
+                { "playlistVideoRenderer": { "videoId": "firstentry0", "title": { "runs": [{ "text": "First" }] } } },
+                { "continuationItemRenderer": { "continuationEndpoint": {
+                    "continuationCommand": { "token": "SAME_TOKEN" } } } }
+            ]}
+        });
+
+        let entries: Vec<Entry> = entry_stream(it, first, PageKind::Playlist)
+            .map(|r| r.expect("entry"))
+            .collect()
+            .await;
+
+        // First page entry + exactly one continuation fetch before the cycle is
+        // detected and the stream terminates.
+        let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["firstentry0", "loopvideo00"]);
+    }
+
+    /// Regression for finding 19: search continuation must re-issue via the
+    /// search endpoint (query re-sent on page 1, continuation-only on page 2),
+    /// and entries from both pages must be yielded.
+    #[tokio::test]
+    async fn search_stream_paginates_via_search_endpoint() {
+        let server = MockServer::start().await;
+
+        // Page 1 (no continuation): videoRenderer + a continuation token.
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/search"))
+            .and(|req: &Request| {
+                let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+                body.get("continuation").is_none() && body["query"] == "rust"
+            })
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "contents": { "twoColumnSearchResultsRenderer": { "primaryContents": {
+                    "sectionListRenderer": { "contents": [
+                        { "itemSectionRenderer": { "contents": [
+                            { "videoRenderer": { "videoId": "searchres01", "title": { "runs": [{ "text": "S1" }] } } }
+                        ]}},
+                        { "continuationItemRenderer": { "continuationEndpoint": {
+                            "continuationCommand": { "token": "SEARCH_TOK_2" } } } }
+                    ]}
+                }}}
+            })))
+            .mount(&server)
+            .await;
+
+        // Page 2 (continuation, query re-sent): videoRenderer, no further token.
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/search"))
+            .and(|req: &Request| {
+                let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+                body.get("continuation").and_then(Value::as_str) == Some("SEARCH_TOK_2")
+            })
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "onResponseReceivedCommands": [{ "appendContinuationItemsAction": {
+                    "continuationItems": [
+                        { "itemSectionRenderer": { "contents": [
+                            { "videoRenderer": { "videoId": "searchres02", "title": { "runs": [{ "text": "S2" }] } } }
+                        ]}}
+                    ]
+                }}]
+            })))
+            .mount(&server)
+            .await;
+
+        let it = Arc::new(InnerTube::with_base_url(
+            reqwest::Client::new(),
+            server.uri(),
+        ));
+        // First page is fetched up front, like the real extractor does.
+        let first = it.search("rust", None).await.unwrap();
+
+        let entries: Vec<Entry> = entry_stream(it, first, PageKind::Search("rust".to_string()))
+            .map(|r| r.expect("entry"))
+            .collect()
+            .await;
+        let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["searchres01", "searchres02"]);
+    }
+
+    /// Regression for finding 19: the channel `richItemRenderer` -> `videoRenderer`
+    /// unwrap path must be exercised and produce entries.
+    #[tokio::test]
+    async fn channel_stream_unwraps_rich_item_renderer() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/browse"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "onResponseReceivedActions": [{ "appendContinuationItemsAction": {
+                    "continuationItems": [
+                        { "richItemRenderer": { "content": {
+                            "videoRenderer": { "videoId": "chanvideo02", "title": { "runs": [{ "text": "C2" }] } }
+                        }}}
+                    ]
+                }}]
+            })))
+            .mount(&server)
+            .await;
+
+        let it = Arc::new(InnerTube::with_base_url(
+            reqwest::Client::new(),
+            server.uri(),
+        ));
+        let first = serde_json::json!({
+            "contents": { "x": [
+                { "richItemRenderer": { "content": {
+                    "videoRenderer": { "videoId": "chanvideo01", "title": { "runs": [{ "text": "C1" }] } }
+                }}},
+                { "continuationItemRenderer": { "continuationEndpoint": {
+                    "continuationCommand": { "token": "CHAN_TOK_2" } } } }
+            ]}
+        });
+
+        let entries: Vec<Entry> = entry_stream(it, first, PageKind::Channel)
+            .map(|r| r.expect("entry"))
+            .collect()
+            .await;
+        let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["chanvideo01", "chanvideo02"]);
     }
 }

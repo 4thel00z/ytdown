@@ -1,9 +1,57 @@
 //! InnerTube API client: talks to YouTube's private `youtubei/v1` endpoints
 //! while impersonating one of several official client identities.
 
+use futures::StreamExt;
 use serde::Deserialize;
 
 use crate::error::{Error, Result, UnavailableReason};
+
+/// Maximum size of a control-plane response body we will buffer (32 MiB).
+///
+/// InnerTube JSON responses are at most a few MB; this cap defends against a
+/// misbehaving, compromised, or hostile endpoint streaming an unbounded body to
+/// exhaust memory. `reqwest` imposes no default response-size limit.
+pub(crate) const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Buffer a response body up to [`MAX_RESPONSE_BYTES`], erroring if exceeded.
+///
+/// Reads incrementally via `bytes_stream` so an oversized (or slow-drip) body is
+/// rejected once the cap is crossed rather than accumulated wholesale.
+pub(crate) async fn read_bounded(resp: reqwest::Response, stage: &'static str) -> Result<Vec<u8>> {
+    if let Some(len) = resp.content_length() {
+        if len > MAX_RESPONSE_BYTES {
+            return Err(Error::Extraction {
+                stage,
+                message: format!("response body too large: {len} bytes"),
+            });
+        }
+    }
+    let mut buf = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|source| Error::Network { stage, source })?;
+        if buf.len() as u64 + chunk.len() as u64 > MAX_RESPONSE_BYTES {
+            return Err(Error::Extraction {
+                stage,
+                message: "response body exceeded size limit".into(),
+            });
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
+}
+
+/// Buffer a response body (bounded) and deserialize it as JSON.
+async fn read_bounded_json<T: serde::de::DeserializeOwned>(
+    resp: reqwest::Response,
+    stage: &'static str,
+) -> Result<T> {
+    let bytes = read_bounded(resp, stage).await?;
+    serde_json::from_slice(&bytes).map_err(|e| Error::Extraction {
+        stage,
+        message: format!("invalid JSON response: {e}"),
+    })
+}
 
 /// Which InnerTube client identity to impersonate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -18,11 +66,19 @@ pub(crate) enum ClientKind {
     Tv,
 }
 
+/// The public InnerTube API key real YouTube web/mobile clients send as
+/// `X-Goog-Api-Key` (and historically as `?key=`). This is not a secret; it is
+/// embedded in YouTube's own client JavaScript.
+const INNERTUBE_API_KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+
 /// Static parameters describing how to present a given [`ClientKind`].
 #[derive(Debug, Clone)]
 pub(crate) struct ClientParams {
     /// `context.client.clientName`.
     pub client_name: &'static str,
+    /// Numeric client id sent as the `X-YouTube-Client-Name` header
+    /// (1=WEB, 3=ANDROID, 5=IOS, 85=TVHTML5_SIMPLY_EMBEDDED_PLAYER).
+    pub client_name_id: u32,
     /// `context.client.clientVersion`.
     pub client_version: &'static str,
     /// `User-Agent` header to send.
@@ -37,26 +93,30 @@ impl ClientKind {
         match self {
             ClientKind::Web => ClientParams {
                 client_name: "WEB",
-                client_version: "2.20240101.00.00",
+                client_name_id: 1,
+                client_version: "2.20240620.05.00",
                 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-                             (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                             (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
                 extras: serde_json::json!({}),
             },
             ClientKind::Android => ClientParams {
                 client_name: "ANDROID",
-                client_version: "19.09.37",
-                user_agent: "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
-                extras: serde_json::json!({ "androidSdkVersion": 30 }),
+                client_name_id: 3,
+                client_version: "19.44.38",
+                user_agent: "com.google.android.youtube/19.44.38 (Linux; U; Android 14) gzip",
+                extras: serde_json::json!({ "androidSdkVersion": 34 }),
             },
             ClientKind::Ios => ClientParams {
                 client_name: "IOS",
-                client_version: "19.09.3",
+                client_name_id: 5,
+                client_version: "19.45.4",
                 user_agent:
-                    "com.google.ios.youtube/19.09.3 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)",
-                extras: serde_json::json!({ "deviceModel": "iPhone14,3" }),
+                    "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X)",
+                extras: serde_json::json!({ "deviceModel": "iPhone16,2" }),
             },
             ClientKind::Tv => ClientParams {
                 client_name: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+                client_name_id: 85,
                 client_version: "2.0",
                 user_agent: "Mozilla/5.0 (PlayStation; PlayStation 4/8.03) AppleWebKit/605.1.15 \
                              (KHTML, like Gecko)",
@@ -110,17 +170,32 @@ impl InnerTube {
     }
 
     /// POST a JSON body to a `youtubei/v1` endpoint, returning the response.
+    ///
+    /// Sends the headers real InnerTube clients require: the public API key
+    /// (`X-Goog-Api-Key`, plus `?key=` for legacy endpoints), the numeric and
+    /// string client identity (`X-YouTube-Client-Name`/`-Version`), and
+    /// `Origin`/`Referer`. Without these the endpoints commonly answer `400`/`403`
+    /// or return a degraded response.
     async fn post(
         &self,
         path: &str,
         client: ClientKind,
         body: serde_json::Value,
     ) -> Result<reqwest::Response> {
-        let url = format!("{}/youtubei/v1/{}", self.base, path);
+        let params = client.params();
+        let url = format!(
+            "{}/youtubei/v1/{}?key={}",
+            self.base, path, INNERTUBE_API_KEY
+        );
         self.http
             .post(url)
-            .header("User-Agent", client.params().user_agent)
+            .header("User-Agent", params.user_agent)
             .header("Content-Type", "application/json")
+            .header("X-Goog-Api-Key", INNERTUBE_API_KEY)
+            .header("X-YouTube-Client-Name", params.client_name_id.to_string())
+            .header("X-YouTube-Client-Version", params.client_version)
+            .header("Origin", "https://www.youtube.com")
+            .header("Referer", "https://www.youtube.com/")
             .json(&body)
             .send()
             .await
@@ -132,19 +207,34 @@ impl InnerTube {
 
     /// Fetch the `player` response for a video.
     ///
+    /// When `sts` (the `signatureTimestamp` scraped from the player JS) is
+    /// supplied, it is sent in `playbackContext.contentPlaybackContext`. Clients
+    /// whose streams are protected by `signatureCipher` (e.g. the TV embedded
+    /// client) require it to return valid streaming data.
+    ///
     /// A non-`OK` `playabilityStatus` is mapped to a typed [`Error::Unavailable`].
-    pub async fn player(&self, video_id: &str, client: ClientKind) -> Result<PlayerResponse> {
-        let body = serde_json::json!({
+    pub async fn player(
+        &self,
+        video_id: &str,
+        client: ClientKind,
+        sts: Option<u64>,
+    ) -> Result<PlayerResponse> {
+        let mut body = serde_json::json!({
             "videoId": video_id,
             "context": Self::context(client),
             "contentCheckOk": true,
             "racyCheckOk": true,
         });
+        if let (Some(obj), Some(sts)) = (body.as_object_mut(), sts) {
+            obj.insert(
+                "playbackContext".into(),
+                serde_json::json!({
+                    "contentPlaybackContext": { "signatureTimestamp": sts }
+                }),
+            );
+        }
         let resp = self.post("player", client, body).await?;
-        let parsed: PlayerResponse = resp.json().await.map_err(|source| Error::Network {
-            stage: "innertube/player",
-            source,
-        })?;
+        let parsed: PlayerResponse = read_bounded_json(resp, "innertube/player").await?;
         parsed.playability_status.ensure_ok()?;
         Ok(parsed)
     }
@@ -165,35 +255,49 @@ impl InnerTube {
             }
         }
         let resp = self.post("browse", client, body).await?;
-        resp.json().await.map_err(|source| Error::Network {
-            stage: "innertube/browse",
-            source,
-        })
+        read_bounded_json(resp, "innertube/browse").await
+    }
+
+    /// Resolve a canonical URL (e.g. `https://www.youtube.com/@handle`) into its
+    /// navigation endpoint via the `navigation/resolve_url` endpoint.
+    ///
+    /// This is how real clients (and yt-dlp) turn an `@handle` into a `UC…`
+    /// channel `browseId`: passing `@handle` directly to `browse` is invalid.
+    pub async fn resolve_url(&self, url: &str) -> Result<serde_json::Value> {
+        let client = ClientKind::Web;
+        let body = serde_json::json!({
+            "context": Self::context(client),
+            "url": url,
+        });
+        let resp = self.post("navigation/resolve_url", client, body).await?;
+        read_bounded_json(resp, "innertube/resolve_url").await
     }
 
     /// Fetch a `search` response as a raw JSON value (video-only filter).
+    ///
+    /// A continuation request carries ONLY `{context, continuation}`: real
+    /// InnerTube rejects (or ignores, repeating page 1) a continuation that also
+    /// re-sends `query`/`params`. The first page carries `query` + the
+    /// video-only `params` filter instead.
     pub async fn search(
         &self,
         query: &str,
         continuation: Option<&str>,
     ) -> Result<serde_json::Value> {
         let client = ClientKind::Web;
-        let mut body = serde_json::json!({
-            "context": Self::context(client),
-            "query": query,
-            "params": "EgIQAQ%3D%3D",
-        });
-        if let (Some(obj), Some(cont)) = (body.as_object_mut(), continuation) {
-            obj.insert(
-                "continuation".into(),
-                serde_json::Value::String(cont.to_string()),
-            );
-        }
+        let body = match continuation {
+            Some(cont) => serde_json::json!({
+                "context": Self::context(client),
+                "continuation": cont,
+            }),
+            None => serde_json::json!({
+                "context": Self::context(client),
+                "query": query,
+                "params": "EgIQAQ%3D%3D",
+            }),
+        };
         let resp = self.post("search", client, body).await?;
-        resp.json().await.map_err(|source| Error::Network {
-            stage: "innertube/search",
-            source,
-        })
+        read_bounded_json(resp, "innertube/search").await
     }
 }
 
@@ -409,9 +513,92 @@ mod tests {
             .await;
 
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
-        let resp = it.player("dQw4w9WgXcQ", ClientKind::Android).await.unwrap();
+        let resp = it
+            .player("dQw4w9WgXcQ", ClientKind::Android, None)
+            .await
+            .unwrap();
         assert_eq!(resp.video_details.video_id, "dQw4w9WgXcQ");
         assert_eq!(resp.streaming_data.unwrap().formats.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn player_request_sends_innertube_headers_and_sts() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/player"))
+            .and(|req: &Request| {
+                // Required InnerTube headers must be present and correct.
+                let header = |name: &str| {
+                    req.headers
+                        .get(name)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string)
+                };
+                let key_ok = header("x-goog-api-key").as_deref() == Some(INNERTUBE_API_KEY);
+                let cname_ok = header("x-youtube-client-name").as_deref() == Some("3");
+                let cver_ok = header("x-youtube-client-version").as_deref() == Some("19.44.38");
+                let origin_ok = header("origin").as_deref() == Some("https://www.youtube.com");
+                // sts threaded into the playback context.
+                let body: serde_json::Value = match serde_json::from_slice(&req.body) {
+                    Ok(v) => v,
+                    Err(_) => return false,
+                };
+                let sts_ok = body["playbackContext"]["contentPlaybackContext"]
+                    ["signatureTimestamp"]
+                    == 19834;
+                key_ok && cname_ok && cver_ok && origin_ok && sts_ok
+            })
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(fixture("player_android.json"), "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        // Mismatched headers/sts would 404 the mock -> error; success proves them.
+        it.player("dQw4w9WgXcQ", ClientKind::Android, Some(19834))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_continuation_omits_query_and_params() {
+        let server = MockServer::start().await;
+        // First page: query + params, no continuation.
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/search"))
+            .and(|req: &Request| {
+                let body: serde_json::Value =
+                    serde_json::from_slice(&req.body).unwrap_or(serde_json::Value::Null);
+                body.get("continuation").is_none()
+                    && body["query"] == "rust"
+                    && body["params"] == "EgIQAQ%3D%3D"
+            })
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(fixture("search.json"), "application/json"),
+            )
+            .mount(&server)
+            .await;
+        // Continuation page: continuation only, NO query/params.
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/search"))
+            .and(|req: &Request| {
+                let body: serde_json::Value =
+                    serde_json::from_slice(&req.body).unwrap_or(serde_json::Value::Null);
+                body.get("continuation").and_then(serde_json::Value::as_str) == Some("TOK")
+                    && body.get("query").is_none()
+                    && body.get("params").is_none()
+            })
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(fixture("search.json"), "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        it.search("rust", None).await.unwrap();
+        it.search("rust", Some("TOK")).await.unwrap();
     }
 
     #[tokio::test]
@@ -427,7 +614,10 @@ mod tests {
             .await;
 
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
-        let resp = it.player("dQw4w9WgXcQ", ClientKind::Android).await.unwrap();
+        let resp = it
+            .player("dQw4w9WgXcQ", ClientKind::Android, None)
+            .await
+            .unwrap();
         let sd = resp.streaming_data.unwrap();
         assert_eq!(sd.adaptive_formats.len(), 1);
         let af = &sd.adaptive_formats[0];
@@ -511,7 +701,7 @@ mod tests {
             .mount(&server)
             .await;
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
-        it.player("x", ClientKind::Web).await.unwrap_err()
+        it.player("x", ClientKind::Web, None).await.unwrap_err()
     }
 
     #[tokio::test]

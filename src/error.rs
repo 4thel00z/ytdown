@@ -48,6 +48,7 @@ pub enum Error {
 
 /// Why media is unavailable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum UnavailableReason {
     /// Removed, private, or never existed.
     Gone,

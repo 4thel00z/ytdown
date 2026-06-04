@@ -182,9 +182,18 @@ impl YoutubeExtractor {
     async fn extract_video(&self, ctx: &ExtractorContext, id: &str) -> Result<MediaInfo> {
         let it = self.innertube(ctx);
 
+        // Obtain the player's signatureTimestamp (sts) so it can be threaded into
+        // the player request: ciphered (TV-embedded) formats are only returned
+        // valid when the request carries the player's sts. Failure to solve the
+        // player is non-fatal here — we fall back to requesting without sts.
+        let sts = match self.solved_player(ctx).await {
+            Ok(player) => player.signature_timestamp(),
+            Err(_) => None,
+        };
+
         // Try clients in order; age-restriction (LOGIN_REQUIRED → AgeRestricted)
         // falls through to embedded clients that can sometimes still play it.
-        let response = self.fetch_player_with_fallback(&it, id).await?;
+        let response = self.fetch_player_with_fallback(&it, id, sts).await?;
 
         let details = &response.video_details;
         let microformat = response
@@ -238,10 +247,15 @@ impl YoutubeExtractor {
     }
 
     /// Fetch the player response, retrying with embedded clients on age restriction.
-    async fn fetch_player_with_fallback(&self, it: &InnerTube, id: &str) -> Result<PlayerResponse> {
+    async fn fetch_player_with_fallback(
+        &self,
+        it: &InnerTube,
+        id: &str,
+        sts: Option<u64>,
+    ) -> Result<PlayerResponse> {
         let mut last_err = None;
         for client in [ClientKind::Android, ClientKind::Tv, ClientKind::Ios] {
-            match it.player(id, client).await {
+            match it.player(id, client, sts).await {
                 Ok(resp) => return Ok(resp),
                 Err(Error::Unavailable {
                     reason: crate::error::UnavailableReason::AgeRestricted,
@@ -294,7 +308,7 @@ impl YoutubeExtractor {
 
         let mut out = Vec::with_capacity(raws.len());
         for raw in raws {
-            let url = match self.resolve_url(raw, solved.as_deref()) {
+            let url = match self.resolve_url(raw, solved.as_deref()).await {
                 Ok(url) => url,
                 Err(e) => {
                     tracing::warn!(itag = raw.itag, error = %e, "skipping undecipherable format");
@@ -307,9 +321,9 @@ impl YoutubeExtractor {
     }
 
     /// Resolve a single raw format's URL, applying cipher solving when available.
-    fn resolve_url(&self, raw: &RawFormat, solved: Option<&SolvedPlayer>) -> Result<String> {
+    async fn resolve_url(&self, raw: &RawFormat, solved: Option<&SolvedPlayer>) -> Result<String> {
         match solved {
-            Some(player) => decipher_url(raw, player),
+            Some(player) => decipher_url(raw, player).await,
             None => raw
                 .url
                 .clone()
@@ -365,14 +379,16 @@ impl YoutubeExtractor {
         let (browse_id, id_label) = match channel {
             ChannelRef::Id(id) => ((*id).to_string(), (*id).to_string()),
             ChannelRef::Handle(handle) => {
-                // Resolve the handle to a browseId via a browse on the handle path.
+                // Resolve the handle to a UC… browseId via the navigation/
+                // resolve_url endpoint. `@handle` is NOT a valid browse target,
+                // so we must resolve it first (as yt-dlp does).
                 let resolved = it
-                    .browse(BrowseRequest {
-                        browse_id: Some(format!("@{handle}")),
-                        ..BrowseRequest::default()
-                    })
+                    .resolve_url(&format!("https://www.youtube.com/@{handle}"))
                     .await?;
-                let bid = find_channel_browse_id(&resolved).unwrap_or_else(|| format!("@{handle}"));
+                let bid = find_channel_browse_id(&resolved).ok_or_else(|| Error::Extraction {
+                    stage: "channel_handle",
+                    message: format!("could not resolve handle @{handle} to a channel id"),
+                })?;
                 (bid, format!("@{handle}"))
             }
         };
