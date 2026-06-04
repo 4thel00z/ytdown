@@ -8,11 +8,6 @@
 //! single-element dispatch array. We re-emit each as self-contained JavaScript
 //! and hand it to [`crate::jsi::JsFunction`] for execution.
 
-// `PlayerSolver`, `fetch_player_js`, `decipher_url`, `solve_*` and their private
-// helpers are exercised by this module's tests but only wired into the extraction
-// flow in Task 10; allow dead code until then.
-#![allow(dead_code)]
-
 use crate::Error;
 use regex::Regex;
 use std::sync::OnceLock;

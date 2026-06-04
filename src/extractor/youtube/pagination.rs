@@ -1,9 +1,5 @@
 //! Lazy continuation-based pagination for YouTube collections.
 
-// The `Channel`/`Search` page kinds and the `search`-driven branch are wired up
-// by the extractor orchestration in Task 10; until then they are unused here.
-#![allow(dead_code)]
-
 use futures::stream::{self, BoxStream};
 use serde_json::Value;
 use std::sync::Arc;

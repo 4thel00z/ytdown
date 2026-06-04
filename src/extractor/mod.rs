@@ -15,8 +15,6 @@ pub struct ExtractorContext {
     pub http: reqwest::Client,
     /// Cipher-solver cache, keyed by player version, so that a solved player is
     /// reused across every video sharing that version.
-    // Read by the YouTube extraction flow in Task 10; populated lazily there.
-    #[allow(dead_code)]
     pub(crate) player_cache: tokio::sync::Mutex<HashMap<String, Arc<SolvedPlayer>>>,
 }
 

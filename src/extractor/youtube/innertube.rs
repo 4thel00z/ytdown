@@ -1,13 +1,5 @@
 //! InnerTube API client: talks to YouTube's private `youtubei/v1` endpoints
 //! while impersonating one of several official client identities.
-//!
-// Pagination (`super::pagination`) consumes `browse`/`search`/`BrowseRequest`
-// and the player cipher solver (`super::player`) consumes `RawFormat`. The
-// remaining items — the `player` request path, `ClientKind`/`ClientParams`,
-// and the typed `PlayerResponse` tree — are wired into the extraction
-// orchestration in Task 10, so dead-code analysis still flags them; allow it
-// crate-internally rather than weaken the contract.
-#![allow(dead_code)]
 
 use serde::Deserialize;
 
@@ -93,6 +85,10 @@ pub(crate) struct InnerTube {
 
 impl InnerTube {
     /// Build a client targeting the real YouTube endpoint.
+    // The extractor constructs clients via `with_base_url` (defaulting its base to
+    // the real origin); this real-origin convenience constructor is part of the
+    // client's surface and is exercised by the public API in Task 12.
+    #[allow(dead_code)]
     pub fn new(http: reqwest::Client) -> Self {
         Self::with_base_url(http, "https://www.youtube.com".into())
     }
@@ -326,6 +322,10 @@ pub(crate) struct StreamingData {
     #[serde(default)]
     pub adaptive_formats: Vec<RawFormat>,
     /// HLS manifest URL for live streams.
+    // v1 treats live content as metadata-only (per the design spec), so the HLS
+    // manifest is parsed but not yet turned into formats. Kept on the typed
+    // contract for completeness and future live support.
+    #[allow(dead_code)]
     #[serde(default)]
     pub hls_manifest_url: Option<String>,
 }
