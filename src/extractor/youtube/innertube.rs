@@ -84,15 +84,6 @@ pub(crate) struct InnerTube {
 }
 
 impl InnerTube {
-    /// Build a client targeting the real YouTube endpoint.
-    // The extractor constructs clients via `with_base_url` (defaulting its base to
-    // the real origin); this real-origin convenience constructor is part of the
-    // client's surface and is exercised by the public API in Task 12.
-    #[allow(dead_code)]
-    pub fn new(http: reqwest::Client) -> Self {
-        Self::with_base_url(http, "https://www.youtube.com".into())
-    }
-
     /// Build a client targeting an arbitrary base URL (for mock servers).
     pub fn with_base_url(http: reqwest::Client, base: String) -> Self {
         Self {
