@@ -1,5 +1,8 @@
 //! Extractor trait and registry: URL-to-media dispatch.
 
+/// YouTube extractor implementation.
+pub mod youtube;
+
 use crate::{Error, MediaInfo, Result};
 
 /// Shared state handed to extractors.
