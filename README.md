@@ -5,9 +5,7 @@
 [![docs.rs](https://img.shields.io/docsrs/ytdown)](https://docs.rs/ytdown)
 
 A Rust **library** mirroring [yt-dlp](https://github.com/yt-dlp/yt-dlp)'s core: resolve a media
-URL into structured metadata and stream formats, select a format, and download it to disk — built
-around an extractor architecture that ships YouTube first. **Library only — there is no CLI and no
-binary.**
+URL into structured metadata and stream formats, select a format, and download it to disk.
 
 ## Quickstart
 
