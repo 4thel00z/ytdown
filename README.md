@@ -37,6 +37,51 @@ async fn main() -> ytdown::Result<()> {
 |----------|---------|----------------------------------------------------------------------|
 | `ffmpeg` | off     | Mux separate DASH audio + video streams via the system `ffmpeg` binary. |
 
+## Architecture
+
+```
+src/
+├── lib.rs              # Public API: Ytdown client (builder), re-exports
+├── error.rs            # Error enum: Network, Extraction, Cipher, UnsupportedUrl, ...
+├── types.rs            # MediaInfo, Format, Thumbnail, Entry, enums (Container, ...)
+├── extractor/
+│   ├── mod.rs          # Extractor trait + Registry (URL → extractor dispatch)
+│   └── youtube/
+│       ├── mod.rs          # URL recognition + orchestration
+│       ├── innertube.rs    # InnerTube client: player/browse/search endpoints
+│       ├── player.rs       # JS player fetch + sig/nsig function extraction
+│       └── pagination.rs   # Continuation-token Stream for playlists/channels/search
+├── jsi.rs              # boa_engine wrapper: execute extracted cipher fns
+├── download/
+│   ├── mod.rs          # Downloader: chunked GET, Range resume, retry/backoff
+│   └── progress.rs     # Progress events + callback plumbing
+├── format.rs           # FormatSelector: best/worst/filters
+└── postprocess.rs      # [feature "ffmpeg"] mux / convert via system ffmpeg
+```
+
+A [`Registry`] holds boxed [`Extractor`]s; `Ytdown::resolve` dispatches to the first
+matching extractor or returns `Error::UnsupportedUrl`. The shared `reqwest::Client`,
+config, and caches travel through an `ExtractorContext`.
+
+## Testing
+
+Unit and offline integration tests (wiremock-backed) run with:
+
+```bash
+cargo test --all-features
+```
+
+Live tests in `tests/live.rs` hit the real YouTube network and are marked
+`#[ignore = "network"]`, so they are skipped by default and in CI. Run them
+explicitly:
+
+```bash
+cargo test --all-features -- --ignored
+```
+
+[`Registry`]: https://docs.rs/ytdown/latest/ytdown/struct.Registry.html
+[`Extractor`]: https://docs.rs/ytdown/latest/ytdown/trait.Extractor.html
+
 ## License
 
 Licensed under either of
