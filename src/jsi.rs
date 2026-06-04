@@ -9,15 +9,12 @@ use crate::error::{Error, Result};
 /// boa contexts are not [`Send`], so we store the SOURCE and rebuild the context on
 /// each call. Cipher functions run rarely (once per player version per video batch),
 /// so rebuilding is cheap relative to the surrounding network work.
-// Consumed by the YouTube player cipher solver (`extractor::youtube::player`),
-// which is implemented in a later task; allow dead code until that lands.
-#[allow(dead_code)]
+#[derive(Debug)]
 pub(crate) struct JsFunction {
     source: String,
     name: String,
 }
 
-#[allow(dead_code)]
 impl JsFunction {
     /// Validate `source` by evaluating it once, then store it for later calls.
     ///

@@ -3,18 +3,30 @@
 /// YouTube extractor implementation.
 pub mod youtube;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use self::youtube::player::SolvedPlayer;
 use crate::{Error, MediaInfo, Result};
 
 /// Shared state handed to extractors.
 pub struct ExtractorContext {
     /// Shared HTTP client.
     pub http: reqwest::Client,
+    /// Cipher-solver cache, keyed by player version, so that a solved player is
+    /// reused across every video sharing that version.
+    // Read by the YouTube extraction flow in Task 10; populated lazily there.
+    #[allow(dead_code)]
+    pub(crate) player_cache: tokio::sync::Mutex<HashMap<String, Arc<SolvedPlayer>>>,
 }
 
 impl ExtractorContext {
     /// Build a context around an existing HTTP client.
     pub fn new(http: reqwest::Client) -> Self {
-        Self { http }
+        Self {
+            http,
+            player_cache: tokio::sync::Mutex::new(HashMap::new()),
+        }
     }
 }
 
