@@ -1,10 +1,12 @@
 //! InnerTube API client: talks to YouTube's private `youtubei/v1` endpoints
 //! while impersonating one of several official client identities.
 //!
-// This module is consumed by the YouTube player, pagination, and extractor
-// orchestration modules (later plan tasks). Until those land, several items are
-// only exercised by this module's own tests, so dead-code analysis would flag
-// them; allow it crate-internally rather than weaken the contract.
+// Pagination (`super::pagination`) consumes `browse`/`search`/`BrowseRequest`
+// and the player cipher solver (`super::player`) consumes `RawFormat`. The
+// remaining items — the `player` request path, `ClientKind`/`ClientParams`,
+// and the typed `PlayerResponse` tree — are wired into the extraction
+// orchestration in Task 10, so dead-code analysis still flags them; allow it
+// crate-internally rather than weaken the contract.
 #![allow(dead_code)]
 
 use serde::Deserialize;

@@ -1,0 +1,22 @@
+{
+  "onResponseReceivedActions": [
+    {
+      "appendContinuationItemsAction": {
+        "continuationItems": [
+          {
+            "playlistVideoRenderer": {
+              "videoId": "ccccccccccc",
+              "title": { "runs": [{ "text": "Third Video" }] },
+              "lengthSeconds": "300",
+              "thumbnail": {
+                "thumbnails": [
+                  { "url": "https://i.test/ccc.jpg", "width": 120, "height": 90 }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
