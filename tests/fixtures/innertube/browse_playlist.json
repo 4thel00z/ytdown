@@ -1,0 +1,63 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "playlistVideoListRenderer": {
+                            "contents": [
+                              {
+                                "playlistVideoRenderer": {
+                                  "videoId": "aaaaaaaaaaa",
+                                  "title": { "runs": [{ "text": "First" }] },
+                                  "lengthSeconds": "100",
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      { "url": "ta", "width": 120, "height": 90 }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "playlistVideoRenderer": {
+                                  "videoId": "bbbbbbbbbbb",
+                                  "title": { "runs": [{ "text": "Second" }] },
+                                  "lengthSeconds": "200",
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      { "url": "tb", "width": 120, "height": 90 }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "continuationItemRenderer": {
+                                  "continuationEndpoint": {
+                                    "continuationCommand": {
+                                      "token": "CONT_TOKEN_1"
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
