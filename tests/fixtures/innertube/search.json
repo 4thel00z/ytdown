@@ -1,0 +1,51 @@
+{
+  "contents": {
+    "twoColumnSearchResultsRenderer": {
+      "primaryContents": {
+        "sectionListRenderer": {
+          "contents": [
+            {
+              "itemSectionRenderer": {
+                "contents": [
+                  {
+                    "videoRenderer": {
+                      "videoId": "ccccccccccc",
+                      "title": { "runs": [{ "text": "Result One" }] },
+                      "lengthText": { "simpleText": "1:40" },
+                      "thumbnail": {
+                        "thumbnails": [
+                          { "url": "tc", "width": 120, "height": 90 }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "videoRenderer": {
+                      "videoId": "ddddddddddd",
+                      "title": { "runs": [{ "text": "Result Two" }] },
+                      "lengthText": { "simpleText": "3:20" },
+                      "thumbnail": {
+                        "thumbnails": [
+                          { "url": "td", "width": 120, "height": 90 }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "continuationItemRenderer": {
+                "continuationEndpoint": {
+                  "continuationCommand": {
+                    "token": "SEARCH_CONT_1"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

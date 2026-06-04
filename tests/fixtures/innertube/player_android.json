@@ -1,0 +1,47 @@
+{
+  "playabilityStatus": {
+    "status": "OK"
+  },
+  "videoDetails": {
+    "videoId": "dQw4w9WgXcQ",
+    "title": "T",
+    "lengthSeconds": "212",
+    "author": "A",
+    "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
+    "viewCount": "123",
+    "shortDescription": "d",
+    "thumbnail": {
+      "thumbnails": [
+        { "url": "u", "width": 120, "height": 90 }
+      ]
+    },
+    "isLive": false
+  },
+  "streamingData": {
+    "formats": [
+      {
+        "itag": 18,
+        "url": "https://r1.test/v.mp4",
+        "mimeType": "video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"",
+        "width": 640,
+        "height": 360,
+        "contentLength": "1000",
+        "bitrate": 500000
+      }
+    ],
+    "adaptiveFormats": [
+      {
+        "itag": 251,
+        "signatureCipher": "s=AAA&sp=sig&url=https%3A%2F%2Fr1.test%2Fa.webm",
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 160000,
+        "audioSampleRate": "48000"
+      }
+    ]
+  },
+  "microformat": {
+    "playerMicroformatRenderer": {
+      "uploadDate": "2009-10-25"
+    }
+  }
+}
