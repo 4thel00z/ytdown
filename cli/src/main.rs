@@ -12,8 +12,9 @@ mod selector;
 #[allow(dead_code)] // wired into main in the `get` task
 mod template;
 
-#[allow(dead_code)] // wired into main in the `formats` task
 mod table;
+
+mod formats;
 
 mod progress;
 
@@ -58,6 +59,14 @@ enum Command {
         #[arg(long)]
         limit: Option<usize>,
     },
+    /// List available formats for a video.
+    Formats {
+        /// Video URL.
+        url: String,
+        /// Emit JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -87,6 +96,10 @@ async fn run(cli: Cli, _mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
         Command::Info { url, pretty, limit } => {
             let yt = app::build_ytdown(ua.as_deref())?;
             info::run(&yt, &url, pretty, limit).await
+        }
+        Command::Formats { url, json } => {
+            let yt = app::build_ytdown(ua.as_deref())?;
+            formats::run(&yt, &url, json).await
         }
     }
 }

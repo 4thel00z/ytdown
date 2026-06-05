@@ -57,3 +57,23 @@ async fn info_emits_video_json() {
         .success()
         .stdout(predicate::str::contains("\"id\":\"dQw4w9WgXcQ\""));
 }
+
+#[tokio::test]
+async fn formats_renders_table() {
+    let server = MockServer::start().await;
+    mount_youtube(&server).await;
+    let uri = server.uri();
+    let assert = tokio::task::spawn_blocking(move || {
+        Command::cargo_bin("ytdown")
+            .unwrap()
+            .env("YTDOWN_BASE_URL", uri)
+            .args(["formats", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"])
+            .assert()
+    })
+    .await
+    .unwrap();
+    assert
+        .success()
+        .stdout(predicate::str::contains("ITAG"))
+        .stdout(predicate::str::contains("KIND"));
+}
