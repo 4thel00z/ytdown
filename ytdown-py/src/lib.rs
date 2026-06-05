@@ -35,7 +35,12 @@ create_exception!(
     YtdownError,
     "No registered extractor matches the URL."
 );
-create_exception!(ytdown, NetworkError, YtdownError, "Underlying HTTP failure.");
+create_exception!(
+    ytdown,
+    NetworkError,
+    YtdownError,
+    "Underlying HTTP failure."
+);
 create_exception!(
     ytdown,
     ExtractionError,
@@ -48,14 +53,24 @@ create_exception!(
     YtdownError,
     "The media exists but cannot be accessed (gone/age-restricted/geo-blocked/live)."
 );
-create_exception!(ytdown, CipherError, YtdownError, "JS cipher solving failed.");
+create_exception!(
+    ytdown,
+    CipherError,
+    YtdownError,
+    "JS cipher solving failed."
+);
 create_exception!(
     ytdown,
     FormatNotFoundError,
     YtdownError,
     "No format matched the selector."
 );
-create_exception!(ytdown, IoError, YtdownError, "Filesystem error during download.");
+create_exception!(
+    ytdown,
+    IoError,
+    YtdownError,
+    "Filesystem error during download."
+);
 create_exception!(
     ytdown,
     PostprocessError,
@@ -238,11 +253,17 @@ impl PyFormat {
     }
     #[getter]
     fn video(&self) -> Option<PyVideoStream> {
-        self.inner.video.clone().map(|inner| PyVideoStream { inner })
+        self.inner
+            .video
+            .clone()
+            .map(|inner| PyVideoStream { inner })
     }
     #[getter]
     fn audio(&self) -> Option<PyAudioStream> {
-        self.inner.audio.clone().map(|inner| PyAudioStream { inner })
+        self.inner
+            .audio
+            .clone()
+            .map(|inner| PyAudioStream { inner })
     }
     #[getter]
     fn filesize(&self) -> Option<u64> {
@@ -331,7 +352,11 @@ impl PyFormatSelector {
 
     /// Keep only formats whose video codec starts with `prefix`.
     fn vcodec_starts_with(&self, prefix: &str) -> Self {
-        self.retain(|f| f.video.as_ref().is_some_and(|v| v.codec.starts_with(prefix)))
+        self.retain(|f| {
+            f.video
+                .as_ref()
+                .is_some_and(|v| v.codec.starts_with(prefix))
+        })
     }
 
     /// The formats currently in the selection.
@@ -387,12 +412,7 @@ impl PyFormatSelector {
     fn best_video_audio(&self) -> PyResult<(PyFormat, PyFormat)> {
         ytdown::FormatSelector::new(&self.formats)
             .best_video_audio()
-            .map(|(v, a)| {
-                (
-                    PyFormat { inner: v.clone() },
-                    PyFormat { inner: a.clone() },
-                )
-            })
+            .map(|(v, a)| (PyFormat { inner: v.clone() }, PyFormat { inner: a.clone() }))
             .map_err(to_pyerr)
     }
 
