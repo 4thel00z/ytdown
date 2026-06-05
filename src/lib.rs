@@ -2,7 +2,7 @@
 //! ytdown — a Rust library mirroring yt-dlp's core functionality.
 //!
 //! Resolve media URLs into metadata and formats, select a format, download it.
-//! There is no CLI; this crate is a library only.
+//! A companion CLI lives in the `ytdown-cli` crate (binary `ytdown`).
 //!
 //! # Quickstart
 //!
