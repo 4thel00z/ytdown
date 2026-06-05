@@ -42,15 +42,39 @@ pub(crate) async fn read_bounded(resp: reqwest::Response, stage: &'static str) -
 }
 
 /// Buffer a response body (bounded) and deserialize it as JSON.
+///
+/// If the body is a Google API error envelope (`{ "error": { "message": ... } }`)
+/// rather than the expected payload, surface that message instead of an opaque
+/// "missing field" deserialization error. InnerTube answers a stale or
+/// malformed request with such an envelope (e.g. HTTP 400 `FAILED_PRECONDITION`).
 async fn read_bounded_json<T: serde::de::DeserializeOwned>(
     resp: reqwest::Response,
     stage: &'static str,
 ) -> Result<T> {
     let bytes = read_bounded(resp, stage).await?;
-    serde_json::from_slice(&bytes).map_err(|e| Error::Extraction {
-        stage,
-        message: format!("invalid JSON response: {e}"),
+    serde_json::from_slice(&bytes).map_err(|e| {
+        if let Some(message) = error_envelope_message(&bytes) {
+            Error::Extraction {
+                stage,
+                message: format!("InnerTube error: {message}"),
+            }
+        } else {
+            Error::Extraction {
+                stage,
+                message: format!("invalid JSON response: {e}"),
+            }
+        }
     })
+}
+
+/// Extract `error.message` from a Google API error envelope, if present.
+fn error_envelope_message(bytes: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value
+        .get("error")?
+        .get("message")?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// Which InnerTube client identity to impersonate.
@@ -102,17 +126,26 @@ impl ClientKind {
             ClientKind::Android => ClientParams {
                 client_name: "ANDROID",
                 client_name_id: 3,
-                client_version: "19.44.38",
-                user_agent: "com.google.android.youtube/19.44.38 (Linux; U; Android 14) gzip",
-                extras: serde_json::json!({ "androidSdkVersion": 34 }),
+                client_version: "20.10.38",
+                user_agent: "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
+                extras: serde_json::json!({
+                    "androidSdkVersion": 34,
+                    "osName": "Android",
+                    "osVersion": "14",
+                }),
             },
             ClientKind::Ios => ClientParams {
                 client_name: "IOS",
                 client_name_id: 5,
-                client_version: "19.45.4",
+                client_version: "20.10.4",
                 user_agent:
-                    "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X)",
-                extras: serde_json::json!({ "deviceModel": "iPhone16,2" }),
+                    "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)",
+                extras: serde_json::json!({
+                    "deviceMake": "Apple",
+                    "deviceModel": "iPhone16,2",
+                    "osName": "iPhone",
+                    "osVersion": "18.3.2.22D82",
+                }),
             },
             ClientKind::Tv => ClientParams {
                 client_name: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
@@ -536,7 +569,7 @@ mod tests {
                 };
                 let key_ok = header("x-goog-api-key").as_deref() == Some(INNERTUBE_API_KEY);
                 let cname_ok = header("x-youtube-client-name").as_deref() == Some("3");
-                let cver_ok = header("x-youtube-client-version").as_deref() == Some("19.44.38");
+                let cver_ok = header("x-youtube-client-version").as_deref() == Some("20.10.38");
                 let origin_ok = header("origin").as_deref() == Some("https://www.youtube.com");
                 // sts threaded into the playback context.
                 let body: serde_json::Value = match serde_json::from_slice(&req.body) {
