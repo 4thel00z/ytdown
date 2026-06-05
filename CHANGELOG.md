@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/4thel00z/ytdown/compare/ytdown-v0.2.0...ytdown-v0.3.0) (2026-06-05)
+
+
+### Features
+
+* add Python bindings (ytdown-py) and PyPI publish via CI ([de2f823](https://github.com/4thel00z/ytdown/commit/de2f823016408b0ce33bc62a1cde390ea1f5236c))
+
 ## [0.2.0](https://github.com/4thel00z/ytdown/compare/ytdown-v0.1.0...ytdown-v0.2.0) (2026-06-05)
 
 
