@@ -110,7 +110,9 @@ async fn channel_handle_resolves_via_resolve_url_then_browses() {
         .and(path("/youtubei/v1/browse"))
         .and(|req: &wiremock::Request| {
             let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap_or_default();
+            // The resolved UC… id AND the uploads-tab params selector must be sent.
             body["browseId"] == "UCresolved00000000000000"
+                && body["params"] == "EgZ2aWRlb3PyBgQKAjoA"
         })
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             fixture("innertube/browse_playlist_page2.json"),
