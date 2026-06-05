@@ -4,8 +4,9 @@
 [![crates.io](https://img.shields.io/crates/v/ytdown.svg)](https://crates.io/crates/ytdown)
 [![docs.rs](https://img.shields.io/docsrs/ytdown)](https://docs.rs/ytdown)
 
-A Rust **library** mirroring [yt-dlp](https://github.com/yt-dlp/yt-dlp)'s core: resolve a media
-URL into structured metadata and stream formats, select a format, and download it to disk.
+A Rust **library** (and companion **CLI**) mirroring [yt-dlp](https://github.com/yt-dlp/yt-dlp)'s
+core: resolve a media URL into structured metadata and stream formats, select a
+format, and download it to disk.
 
 ## Quickstart
 
@@ -115,6 +116,36 @@ cargo test --all-features -- --ignored
 
 [`Registry`]: https://docs.rs/ytdown/latest/ytdown/struct.Registry.html
 [`Extractor`]: https://docs.rs/ytdown/latest/ytdown/trait.Extractor.html
+
+## CLI
+
+The `ytdown-cli` crate ships a `ytdown` binary over the same engine:
+
+```sh
+cargo install ytdown-cli
+```
+
+```sh
+# Inspect available formats
+ytdown formats https://youtu.be/dQw4w9WgXcQ
+
+# Download: best merged video+audio (needs ffmpeg), or best progressive
+ytdown get https://youtu.be/dQw4w9WgXcQ -o '{title}.{ext}'
+
+# Explicit formats: keywords, itags, or video+audio merge pairs
+ytdown get -f 137+140 https://youtu.be/dQw4w9WgXcQ
+
+# Metadata as JSON, search from the terminal
+ytdown info https://youtu.be/dQw4w9WgXcQ | jq .title
+ytdown search "rust async" -n 5
+
+# Playlists/channels download entry-by-entry
+ytdown get 'https://www.youtube.com/playlist?list=…' --limit 10 -o '{index} - {title}.{ext}'
+```
+
+Run `ytdown get` on a TTY without `-f` and an interactive format picker opens;
+`--no-tui` (or piping) selects the best format automatically. Shell completions:
+`ytdown completions zsh`.
 
 ## License
 
