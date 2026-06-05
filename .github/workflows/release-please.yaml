@@ -3,6 +3,9 @@ name: release-please
 on:
   push:
     branches: [main, master]
+  # Manual dispatch re-publishes the current master version to PyPI
+  # (e.g. when a wheel build failed during the release run).
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -40,7 +43,7 @@ jobs:
 
   pypi-wheels:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -71,7 +74,7 @@ jobs:
 
   publish-pypi:
     needs: [release-please, pypi-wheels]
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       # Trusted Publishing (OIDC) — no API token needed.
