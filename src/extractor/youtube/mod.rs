@@ -661,6 +661,27 @@ mod tests {
         assert_eq!(format_upload_date("2009-10-25"), "20091025");
     }
 
+    #[test]
+    fn find_channel_browse_id_walks_to_uc_id() {
+        // Must skip a non-UC browseId and return the nested UC… one.
+        let value = serde_json::json!({
+            "header": { "browseId": "FEwhatever" },
+            "endpoint": {
+                "browseEndpoint": { "browseId": "UCresolved00000000000000" }
+            }
+        });
+        assert_eq!(
+            find_channel_browse_id(&value).as_deref(),
+            Some("UCresolved00000000000000")
+        );
+    }
+
+    #[test]
+    fn find_channel_browse_id_none_without_uc() {
+        let value = serde_json::json!({ "endpoint": { "browseId": "VLnope" } });
+        assert!(find_channel_browse_id(&value).is_none());
+    }
+
     fn sample_raw(mime: &str) -> RawFormat {
         RawFormat {
             itag: 1,

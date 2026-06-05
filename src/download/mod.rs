@@ -90,7 +90,7 @@ impl Downloader {
         let info = self.probe(url, &opts).await?;
 
         // Bytes already present on disk we can resume from.
-        let existing = if opts.resume {
+        let mut existing = if opts.resume {
             match tokio::fs::metadata(dest).await {
                 Ok(m) => m.len(),
                 Err(_) => 0,
@@ -99,11 +99,20 @@ impl Downloader {
             0
         };
 
-        // Already complete?
+        // Reconcile the existing partial against the known total.
         if let Some(total) = info.total {
-            if existing >= total && total > 0 {
-                emit_final(&opts, total);
-                return Ok(());
+            if total > 0 {
+                if existing == total {
+                    // Exactly complete: nothing left to fetch.
+                    emit_final(&opts, total);
+                    return Ok(());
+                }
+                if existing > total {
+                    // Corrupt/oversized partial (larger than the real resource):
+                    // it cannot be a valid prefix to resume from, so discard it
+                    // and restart from scratch rather than silently accepting it.
+                    existing = 0;
+                }
             }
         }
 
@@ -890,6 +899,79 @@ mod tests {
             "failed parallel download must not leave a file at dest"
         );
         assert!(!super::part_path(&dest).exists(), "no leftover .part file");
+    }
+
+    /// Regression for finding 2: an existing partial file LARGER than the real
+    /// resource (corrupt/oversized) must not be silently accepted as complete.
+    /// The download must restart from scratch (no Range header) and the file
+    /// must equal the full real body afterwards.
+    #[tokio::test]
+    async fn oversized_existing_partial_is_restarted_from_scratch() {
+        let server = MockServer::start().await;
+        let body: Vec<u8> = (0..2000u32).map(|i| (i % 251) as u8).collect();
+
+        // Record every Range header so we can prove no resume range was sent.
+        let ranges: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+        struct RecordingResponder {
+            body: Vec<u8>,
+            ranges: Arc<Mutex<Vec<String>>>,
+        }
+        impl Respond for RecordingResponder {
+            fn respond(&self, req: &Request) -> ResponseTemplate {
+                let len = self.body.len() as u64;
+                if let Some(range) = req.headers.get("range") {
+                    if let Ok(range) = range.to_str() {
+                        self.ranges.lock().unwrap().push(range.to_string());
+                        if let Some((start, end)) = parse_range(range, len) {
+                            let slice = self.body[start as usize..=end as usize].to_vec();
+                            return ResponseTemplate::new(206)
+                                .insert_header("accept-ranges", "bytes")
+                                .insert_header(
+                                    "content-range",
+                                    format!("bytes {start}-{end}/{len}").as_str(),
+                                )
+                                .set_body_bytes(slice);
+                        }
+                    }
+                }
+                ResponseTemplate::new(200)
+                    .insert_header("accept-ranges", "bytes")
+                    .set_body_bytes(self.body.clone())
+            }
+        }
+
+        Mock::given(path("/file"))
+            .respond_with(RecordingResponder {
+                body: body.clone(),
+                ranges: ranges.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.bin");
+        // Pre-write a file LARGER than the real body (corrupt/oversized partial).
+        std::fs::write(&dest, vec![0xABu8; body.len() + 5000]).unwrap();
+
+        let dl = Downloader::new(reqwest::Client::new());
+        dl.download(
+            &format!("{}/file", server.uri()),
+            &dest,
+            DownloadOptions::default(),
+        )
+        .await
+        .unwrap();
+
+        // The file must be rewritten to exactly the real body.
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+
+        // No resume range may have been issued (only the bytes=0-0 probe is allowed).
+        let recorded = ranges.lock().unwrap();
+        assert!(
+            recorded.iter().all(|r| r == "bytes=0-0"),
+            "oversized partial must not trigger a resume Range, got {recorded:?}"
+        );
     }
 
     /// Regression for finding 17: retry exhaustion must surface as

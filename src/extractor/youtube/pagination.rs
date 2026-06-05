@@ -29,6 +29,17 @@ pub(crate) enum PageKind {
 /// bounding the work an iterate-to-completion consumer can be made to do.
 const MAX_PAGES: u32 = 10_000;
 
+/// Maximum number of *consecutive* continuation pages that may yield zero entries
+/// before pagination gives up.
+///
+/// `MAX_PAGES` and seen-token cycle detection do not stop a server that hands
+/// back a FRESH continuation token on every page while never producing an entry:
+/// such a stream makes no progress yet defeats cycle detection and could spin up
+/// to `MAX_PAGES` fetches. A real collection interleaves entries with its
+/// continuations, so a short run of entry-less pages is a reliable "no progress"
+/// signal to terminate on.
+const MAX_CONSECUTIVE_EMPTY_PAGES: u32 = 3;
+
 /// Per-step state threaded through the [`stream::unfold`] driving pagination.
 struct PageState {
     it: Arc<InnerTube>,
@@ -43,6 +54,8 @@ struct PageState {
     pages_fetched: u32,
     /// Continuation tokens already seen, to break token cycles.
     seen_tokens: std::collections::HashSet<String>,
+    /// Consecutive continuation fetches that produced no entries (no-progress guard).
+    consecutive_empty: u32,
 }
 
 /// Turn an initial browse/search response into a lazy entry stream.
@@ -63,6 +76,7 @@ pub(crate) fn entry_stream(
         first_page: Some(first_page),
         pages_fetched: 0,
         seen_tokens: std::collections::HashSet::new(),
+        consecutive_empty: 0,
     };
 
     let stream = stream::unfold(state, |mut state| async move {
@@ -105,6 +119,18 @@ pub(crate) fn entry_stream(
             match fetched {
                 Ok(page) => {
                     let (entries, next) = parse_entries(&page, &state.kind);
+                    // No-progress guard: a page that yields no entries but keeps
+                    // handing back a (fresh) continuation token makes no progress
+                    // yet evades both MAX_PAGES (slowly) and cycle detection
+                    // (tokens differ). Stop after a short run of empty pages.
+                    if entries.is_empty() {
+                        state.consecutive_empty += 1;
+                        if state.consecutive_empty >= MAX_CONSECUTIVE_EMPTY_PAGES {
+                            return None;
+                        }
+                    } else {
+                        state.consecutive_empty = 0;
+                    }
                     state.buffer.extend(entries);
                     state.next = next;
                     // Loop: drain the freshly-filled buffer (or stop if empty).
@@ -342,6 +368,61 @@ mod tests {
         // detected and the stream terminates.
         let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, vec!["firstentry0", "loopvideo00"]);
+    }
+
+    /// Finding 1: a server that returns NO entries but a FRESH continuation
+    /// token on every page makes no progress yet defeats cycle detection (tokens
+    /// always differ). The no-progress guard must terminate the stream after a
+    /// short run of empty pages instead of spinning up to MAX_PAGES.
+    #[tokio::test]
+    async fn pagination_stops_on_no_progress_fresh_tokens() {
+        let server = MockServer::start().await;
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let hits_resp = hits.clone();
+
+        // Each continuation page: zero entries, but a brand-new token each time.
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/browse"))
+            .respond_with(move |_req: &Request| {
+                let n = hits_resp.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "onResponseReceivedActions": [{ "appendContinuationItemsAction": {
+                        "continuationItems": [
+                            { "continuationItemRenderer": { "continuationEndpoint": {
+                                "continuationCommand": { "token": format!("FRESH_{n}") } } } }
+                        ]
+                    }}]
+                }))
+            })
+            .mount(&server)
+            .await;
+
+        let it = Arc::new(InnerTube::with_base_url(
+            reqwest::Client::new(),
+            server.uri(),
+        ));
+        // First page: one entry + a fresh continuation token.
+        let first = serde_json::json!({
+            "contents": { "x": [
+                { "playlistVideoRenderer": { "videoId": "firstentry0", "title": { "runs": [{ "text": "First" }] } } },
+                { "continuationItemRenderer": { "continuationEndpoint": {
+                    "continuationCommand": { "token": "FRESH_START" } } } }
+            ]}
+        });
+
+        let entries: Vec<Entry> = entry_stream(it, first, PageKind::Playlist)
+            .map(|r| r.expect("entry"))
+            .collect()
+            .await;
+
+        // Only the first-page entry; the empty-page run terminates the stream.
+        let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["firstentry0"]);
+        // Far fewer than MAX_PAGES: bounded by MAX_CONSECUTIVE_EMPTY_PAGES.
+        assert!(
+            hits.load(std::sync::atomic::Ordering::SeqCst) <= MAX_CONSECUTIVE_EMPTY_PAGES,
+            "no-progress guard must stop after a few empty pages"
+        );
     }
 
     /// Regression for finding 19: search continuation must re-issue via the

@@ -65,7 +65,23 @@ impl SolvedPlayer {
     /// function. Runs off the async executor under a timeout, like [`solve_sig`].
     pub async fn solve_n(&self, n: &str) -> crate::Result<String> {
         match &self.nsig {
-            Some(f) => f.call_str_async(n).await,
+            Some(f) => {
+                let out = f.call_str_async(n).await?;
+                // Real nsig functions reference surrounding globals and include
+                // `typeof X==="undefined"` early-return guards; executed
+                // standalone (without those globals) they can silently return
+                // their input unchanged. A passthrough is therefore a strong
+                // signal the extracted function did not actually transform `n`,
+                // which yields throttled/expiring stream URLs downstream.
+                if out == n {
+                    tracing::warn!(
+                        n = %n,
+                        "nsig solve returned its input unchanged; the n parameter \
+                         may be un-transformed (player nsig extraction degraded)"
+                    );
+                }
+                Ok(out)
+            }
             None => Err(Error::Cipher("no nsig function in player".into())),
         }
     }
@@ -556,6 +572,68 @@ mod tests {
     async fn extracts_and_solves_nsig() {
         let player = PlayerSolver::from_js(SYNTHETIC).unwrap();
         assert_eq!(player.solve_n("abcdef").await.unwrap(), "kjihgf");
+    }
+
+    /// Finding 7: a guard-style nsig function (one that returns its input
+    /// unchanged when a surrounding global is undefined, as real player nsig
+    /// functions do when executed standalone) must still succeed but emit a
+    /// `tracing::warn`. We install a minimal subscriber that records whether any
+    /// WARN-level event fired during the solve.
+    #[tokio::test]
+    async fn nsig_passthrough_emits_warning() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use tracing::span;
+
+        // A minimal subscriber that flips a flag when a WARN event is recorded.
+        struct WarnCatcher(Arc<AtomicBool>);
+        impl tracing::Subscriber for WarnCatcher {
+            fn enabled(&self, meta: &tracing::Metadata<'_>) -> bool {
+                *meta.level() <= tracing::Level::WARN
+            }
+            fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
+                span::Id::from_u64(1)
+            }
+            fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+            fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+            fn event(&self, event: &tracing::Event<'_>) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    self.0.store(true, Ordering::SeqCst);
+                }
+            }
+            fn enter(&self, _: &span::Id) {}
+            fn exit(&self, _: &span::Id) {}
+        }
+
+        // A guard-style nsig: `if (typeof glob === "undefined") return a;` — when
+        // run standalone (no `glob`), it returns its argument unchanged.
+        let guarded = crate::jsi::JsFunction::compile(
+            r#"function nsig(a){if(typeof glob==="undefined")return a;return a+"!"}"#,
+            "nsig",
+        )
+        .unwrap();
+        let player = SolvedPlayer {
+            sig: crate::jsi::JsFunction::compile(
+                r#"function sig(a){return a.split("").join("")}"#,
+                "sig",
+            )
+            .unwrap(),
+            nsig: Some(guarded),
+            sts: None,
+        };
+
+        let warned = Arc::new(AtomicBool::new(false));
+        let subscriber = WarnCatcher(warned.clone());
+        let out = tracing::subscriber::with_default(subscriber, || {
+            futures::executor::block_on(player.solve_n("untouched"))
+        })
+        .unwrap();
+
+        assert_eq!(out, "untouched", "guarded nsig returns input unchanged");
+        assert!(
+            warned.load(Ordering::SeqCst),
+            "a passthrough nsig solve must emit a tracing::warn"
+        );
     }
 
     #[test]

@@ -13,12 +13,18 @@ use crate::types::{Container, Format, FormatKind};
 /// use ytdown::types::{Format, VideoStream};
 /// use ytdown::format::FormatSelector;
 ///
-/// let formats = vec![Format {
-///     itag: Some(22),
-///     video: Some(VideoStream { width: Some(1280), height: Some(720), fps: Some(30.0), codec: "avc1".into() }),
-///     audio: None,
-///     ..Format::default()
-/// }];
+/// // `Format`/`VideoStream` are `#[non_exhaustive]`; build them via `Default`.
+/// let mut video = VideoStream::default();
+/// video.width = Some(1280);
+/// video.height = Some(720);
+/// video.fps = Some(30.0);
+/// video.codec = "avc1".into();
+///
+/// let mut fmt = Format::default();
+/// fmt.itag = Some(22);
+/// fmt.video = Some(video);
+///
+/// let formats = vec![fmt];
 /// let best = FormatSelector::new(&formats).best_video().unwrap();
 /// assert_eq!(best.itag, Some(22));
 /// ```

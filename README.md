@@ -31,6 +31,40 @@ async fn main() -> ytdown::Result<()> {
 }
 ```
 
+## Collections (playlists / channels / search)
+
+`resolve` returns `MediaInfo::Collection` for playlists, channels, and
+`ytsearch:` queries. Its `entries` field is a `futures::Stream` that paginates
+lazily, so consume it with [`futures::StreamExt`] (`next`, `take`, `collect`, …).
+Add `futures` to your `Cargo.toml` to bring the extension trait into scope:
+
+```toml
+[dependencies]
+futures = "0.3"
+```
+
+```rust,no_run
+use futures::StreamExt;
+use ytdown::{MediaInfo, Ytdown};
+
+#[tokio::main]
+async fn main() -> ytdown::Result<()> {
+    let yt = Ytdown::builder().build()?;
+    if let MediaInfo::Collection(mut col) = yt.resolve("ytsearch:rust async").await? {
+        // Take the first 5 entries without fetching the whole collection.
+        while let Some(entry) = col.entries.next().await {
+            let entry = entry?;
+            println!("{} — {}", entry.id, entry.title.as_deref().unwrap_or(""));
+            // Resolve an entry's full metadata + formats on demand:
+            // let info = yt.resolve(&entry.url).await?;
+        }
+    }
+    Ok(())
+}
+```
+
+[`futures::StreamExt`]: https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html
+
 ## Features
 
 | Feature  | Default | Description                                                          |

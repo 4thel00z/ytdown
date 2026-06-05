@@ -571,6 +571,10 @@ mod tests {
                 let cname_ok = header("x-youtube-client-name").as_deref() == Some("3");
                 let cver_ok = header("x-youtube-client-version").as_deref() == Some("20.10.38");
                 let origin_ok = header("origin").as_deref() == Some("https://www.youtube.com");
+                // The per-client User-Agent must be the Android one (refreshed in
+                // 0f1e101 to client version 20.10.38).
+                let ua_ok = header("user-agent").as_deref()
+                    == Some("com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip");
                 // sts threaded into the playback context.
                 let body: serde_json::Value = match serde_json::from_slice(&req.body) {
                     Ok(v) => v,
@@ -579,7 +583,13 @@ mod tests {
                 let sts_ok = body["playbackContext"]["contentPlaybackContext"]
                     ["signatureTimestamp"]
                     == 19834;
-                key_ok && cname_ok && cver_ok && origin_ok && sts_ok
+                // The Android `extras` must be merged into context.client.
+                let client = &body["context"]["client"];
+                let extras_ok = client["androidSdkVersion"] == 34
+                    && client["osName"] == "Android"
+                    && client["osVersion"] == "14"
+                    && client["clientVersion"] == "20.10.38";
+                key_ok && cname_ok && cver_ok && origin_ok && ua_ok && sts_ok && extras_ok
             })
             .respond_with(
                 ResponseTemplate::new(200)
@@ -591,6 +601,47 @@ mod tests {
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
         // Mismatched headers/sts would 404 the mock -> error; success proves them.
         it.player("dQw4w9WgXcQ", ClientKind::Android, Some(19834))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn ios_player_request_sends_ios_user_agent_and_device_model() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/player"))
+            .and(|req: &Request| {
+                let header = |name: &str| {
+                    req.headers
+                        .get(name)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string)
+                };
+                let ua_ok = header("user-agent").as_deref()
+                    == Some(
+                        "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)",
+                    );
+                let cname_ok = header("x-youtube-client-name").as_deref() == Some("5");
+                let body: serde_json::Value = match serde_json::from_slice(&req.body) {
+                    Ok(v) => v,
+                    Err(_) => return false,
+                };
+                let client = &body["context"]["client"];
+                let extras_ok = client["deviceMake"] == "Apple"
+                    && client["deviceModel"] == "iPhone16,2"
+                    && client["clientVersion"] == "20.10.4";
+                ua_ok && cname_ok && extras_ok
+            })
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(fixture("player_android.json"), "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        // A mismatched UA/extras would not match the mock and 404 -> error.
+        it.player("dQw4w9WgXcQ", ClientKind::Ios, None)
             .await
             .unwrap();
     }

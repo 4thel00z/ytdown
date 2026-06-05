@@ -29,3 +29,12 @@ tracing = "0.1"
 wiremock = "0.6"
 tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"
+
+# cargo-husky: the Rust-native alternative to pre-commit. On the first
+# build/test it installs the git hooks under `.cargo-husky/hooks/` into
+# `.git/hooks`. The `user-hooks` feature uses our own hook script (the
+# fmt + clippy + test gate) instead of cargo-husky's defaults.
+[dev-dependencies.cargo-husky]
+version = "1"
+default-features = false
+features = ["user-hooks"]

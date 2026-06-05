@@ -16,6 +16,7 @@ pub enum MediaInfo {
 
 /// Metadata + formats for one video.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct VideoInfo {
     /// Site-specific video identifier.
     pub id: String,
@@ -54,6 +55,7 @@ impl VideoInfo {
 
 /// A single thumbnail image.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct Thumbnail {
     /// Thumbnail image URL.
     pub url: String,
@@ -65,6 +67,7 @@ pub struct Thumbnail {
 
 /// One downloadable representation.
 #[derive(Debug, Clone, Default, Serialize)]
+#[non_exhaustive]
 pub struct Format {
     /// YouTube-style integer tag identifying the stream, if any.
     pub itag: Option<u32>,
@@ -85,7 +88,8 @@ pub struct Format {
 }
 
 /// Parameters of a video stream.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
+#[non_exhaustive]
 pub struct VideoStream {
     /// Pixel width, if known.
     pub width: Option<u32>,
@@ -98,7 +102,8 @@ pub struct VideoStream {
 }
 
 /// Parameters of an audio stream.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
+#[non_exhaustive]
 pub struct AudioStream {
     /// Codec string, e.g. `mp4a.40.2`.
     pub codec: String,
@@ -155,6 +160,27 @@ impl Format {
 }
 
 /// A collection (playlist/channel/search) whose entries stream in lazily.
+///
+/// [`entries`](CollectionInfo::entries) is a [`futures::Stream`]; consume it with
+/// [`futures::StreamExt`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html)
+/// (`next`, `take`, `collect`, …). Add `futures` to your `Cargo.toml` to bring
+/// the extension trait into scope. Each [`Entry::url`] can be passed back to
+/// [`Ytdown::resolve`](crate::Ytdown::resolve) to fetch the full item.
+///
+/// ```rust,no_run
+/// use futures::StreamExt;
+/// use ytdown::{MediaInfo, Ytdown};
+///
+/// # async fn run(yt: &Ytdown) -> ytdown::Result<()> {
+/// if let MediaInfo::Collection(mut col) = yt.resolve("ytsearch:rust").await? {
+///     while let Some(entry) = col.entries.next().await {
+///         let entry = entry?;
+///         println!("{}: {:?}", entry.id, entry.title);
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub struct CollectionInfo {
     /// Site-specific collection identifier.
     pub id: String,
@@ -191,8 +217,18 @@ pub enum CollectionKind {
 
 /// A lightweight reference to an item inside a collection.
 ///
-/// Resolve via `Ytdown::resolve(entry.url)`.
-#[derive(Debug, Clone, Serialize)]
+/// Resolve the full item by passing its [`url`](Entry::url) back to
+/// [`Ytdown::resolve`](crate::Ytdown::resolve):
+///
+/// ```rust,no_run
+/// # async fn run(yt: &ytdown::Ytdown, entry: &ytdown::Entry) -> ytdown::Result<()> {
+/// let info = yt.resolve(&entry.url).await?;
+/// # let _ = info;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Default, Serialize)]
+#[non_exhaustive]
 pub struct Entry {
     /// Site-specific item identifier.
     pub id: String,
