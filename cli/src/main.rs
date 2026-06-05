@@ -6,6 +6,9 @@ use clap_complete::Shell;
 #[allow(dead_code)] // wired into main in the `get` task
 mod selector;
 
+#[allow(dead_code)] // wired into main in the `get` task
+mod template;
+
 #[derive(Parser)]
 #[command(
     name = "ytdown",
