@@ -253,6 +253,22 @@ impl<'a> DownloadBuilder<'a> {
         self
     }
 
+    /// Chunk size (in bytes) used by the parallel range-chunk path (default 10 MiB).
+    ///
+    /// Only takes effect when [`concurrency`](Self::concurrency) is greater than 1
+    /// and the server supports range requests.
+    pub fn chunk_size(mut self, bytes: u64) -> Self {
+        self.options.chunk_size = bytes;
+        self
+    }
+
+    /// Maximum retry attempts per request (default 3), with jittered exponential
+    /// backoff between attempts.
+    pub fn retries(mut self, n: u32) -> Self {
+        self.options.retries = n;
+        self
+    }
+
     /// Whether to resume from an existing partial file (default `true`).
     pub fn resume(mut self, yes: bool) -> Self {
         self.options.resume = yes;
@@ -270,5 +286,31 @@ impl<'a> IntoFuture for DownloadBuilder<'a> {
                 .download(&self.url, &self.dest, self.options)
                 .await
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Finding 5: `chunk_size()` and `retries()` must actually reach the
+    /// underlying `DownloadOptions` (previously unreachable via the builder).
+    #[test]
+    fn builder_setters_reach_download_options() {
+        let yt = Ytdown::builder().build().expect("build");
+        let fmt = Format {
+            url: "https://example.invalid/x".into(),
+            ..Format::default()
+        };
+        let builder = yt
+            .download(&fmt, "out.bin")
+            .concurrency(8)
+            .chunk_size(1234)
+            .retries(7)
+            .resume(false);
+        assert_eq!(builder.options.concurrency, 8);
+        assert_eq!(builder.options.chunk_size, 1234);
+        assert_eq!(builder.options.retries, 7);
+        assert!(!builder.options.resume);
     }
 }
