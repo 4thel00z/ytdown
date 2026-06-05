@@ -5,11 +5,12 @@ use clap_complete::Shell;
 
 mod app;
 
+mod get;
+
 mod info;
 
 mod selector;
 
-#[allow(dead_code)] // wired into main in the `get` task
 mod template;
 
 mod table;
@@ -80,6 +81,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Download a video, playlist, channel, or search result set.
+    Get(get::GetArgs),
 }
 
 #[tokio::main]
@@ -98,7 +101,7 @@ async fn main() {
     }
 }
 
-async fn run(cli: Cli, _mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
+async fn run(cli: Cli, mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
     let ua = cli.user_agent.clone();
     match cli.command {
         Command::Completions { shell } => {
@@ -117,6 +120,10 @@ async fn run(cli: Cli, _mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
         Command::Search { query, limit, json } => {
             let yt = app::build_ytdown(ua.as_deref())?;
             search::run(&yt, &query, limit, json).await
+        }
+        Command::Get(args) => {
+            let yt = app::build_ytdown(ua.as_deref())?;
+            get::run(&yt, mp, &args).await
         }
     }
 }

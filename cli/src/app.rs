@@ -23,7 +23,6 @@ pub fn build_ytdown(user_agent: Option<&str>) -> anyhow::Result<Ytdown> {
 }
 
 /// True if the ffmpeg binary at `path` runs.
-#[allow(dead_code)] // wired in the `get` task
 pub async fn ffmpeg_available(path: &Path) -> bool {
     tokio::process::Command::new(path)
         .arg("-version")

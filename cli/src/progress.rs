@@ -5,7 +5,6 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use ytdown::Progress;
 
 /// Create a styled byte-progress bar attached to `mp`.
-#[allow(dead_code)] // wired into main in the `get` task
 pub fn bar(mp: &MultiProgress, label: &str) -> ProgressBar {
     let pb = mp.add(ProgressBar::new(0));
     pb.set_style(
@@ -19,7 +18,6 @@ pub fn bar(mp: &MultiProgress, label: &str) -> ProgressBar {
 }
 
 /// Adapt a bar into the `DownloadBuilder::progress` callback shape.
-#[allow(dead_code)] // wired into main in the `get` task
 pub fn callback(pb: ProgressBar) -> impl Fn(Progress) + Send + Sync + 'static {
     move |p: Progress| {
         if let Some(total) = p.total_bytes {

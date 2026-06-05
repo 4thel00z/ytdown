@@ -15,7 +15,6 @@ impl std::fmt::Display for UsageError {
 impl std::error::Error for UsageError {}
 
 /// Parsed value of `-f`.
-#[allow(dead_code)] // wired into main in the `get` task
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormatSpec {
     /// Best progressive (muxed A+V) format.
@@ -51,13 +50,11 @@ impl std::str::FromStr for FormatSpec {
     }
 }
 
-#[allow(dead_code)]
 fn bad(s: &str) -> String {
     format!("invalid format selector {s:?}: expected best, bestvideo, bestaudio, an itag, or VIDEO_ITAG+AUDIO_ITAG")
 }
 
 /// What to download: one format, or a video+audio pair to merge.
-#[allow(dead_code)] // wired into main in the `get` task
 #[derive(Debug)]
 pub enum Selection<'a> {
     /// A single (progressive or stream-only) format.
@@ -75,7 +72,6 @@ pub enum Selection<'a> {
 ///
 /// `--max-height`/`--container` filters apply to keyword specs; combining
 /// them with explicit itags is a [`UsageError`].
-#[allow(dead_code)] // wired into main in the `get` task
 pub fn resolve<'a>(
     spec: Option<&FormatSpec>,
     formats: &'a [Format],
@@ -130,7 +126,6 @@ pub fn resolve<'a>(
 }
 
 /// The shared filters-vs-itag conflict error.
-#[allow(dead_code)] // wired into main in the `get` task
 pub fn itag_filter_conflict() -> UsageError {
     UsageError("--max-height/--container cannot be combined with explicit itags in -f".into())
 }

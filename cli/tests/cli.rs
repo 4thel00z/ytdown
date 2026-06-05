@@ -42,3 +42,40 @@ fn search_help_shows_limit_flag() {
         .success()
         .stdout(predicate::str::contains("--limit"));
 }
+
+#[test]
+fn get_filters_with_itag_exit_2() {
+    Command::cargo_bin("ytdown")
+        .unwrap()
+        .args([
+            "get",
+            "-f",
+            "22",
+            "--max-height",
+            "720",
+            "https://example.com/x",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("cannot be combined"));
+}
+
+#[test]
+fn get_bad_format_selector_exit_2() {
+    Command::cargo_bin("ytdown")
+        .unwrap()
+        .args(["get", "-f", "bogus", "https://example.com/x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid format selector"));
+}
+
+#[test]
+fn get_bad_template_exit_2() {
+    Command::cargo_bin("ytdown")
+        .unwrap()
+        .args(["get", "-o", "{nope}", "https://example.com/x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown placeholder"));
+}
