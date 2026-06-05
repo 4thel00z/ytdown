@@ -3,7 +3,13 @@
   "packages": {
     ".": {
       "release-type": "rust",
+      "package-name": "ytdown",
       "extra-files": ["ytdown-py/Cargo.toml"]
+    },
+    "cli": {
+      "release-type": "rust",
+      "package-name": "ytdown-cli"
     }
-  }
+  },
+  "plugins": ["cargo-workspace"]
 }

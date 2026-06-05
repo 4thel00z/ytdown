@@ -1,0 +1,32 @@
+[package]
+name = "ytdown-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Command-line interface for ytdown: extract, select, and download media."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/4thel00z/ytdown"
+keywords = ["youtube", "download", "media", "yt-dlp", "cli"]
+categories = ["multimedia", "command-line-utilities"]
+
+[[bin]]
+name = "ytdown"
+path = "src/main.rs"
+
+[dependencies]
+ytdown = { path = "..", version = "0.3", features = ["ffmpeg"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+crossterm = "0.28"
+futures = "0.3"
+indicatif = "0.17"
+ratatui = "0.29"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+wiremock = "0.6"

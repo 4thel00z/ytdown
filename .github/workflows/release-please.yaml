@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
+      releases_created: ${{ steps.rp.outputs.releases_created }}
+      lib_release_created: ${{ steps.rp.outputs.release_created }}
+      cli_release_created: ${{ steps.rp.outputs['cli--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: rp
@@ -25,14 +28,21 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.releases_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo publish
+      - name: Publish ytdown
+        if: needs.release-please.outputs.lib_release_created == 'true'
+        run: cargo publish -p ytdown
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Publish ytdown-cli
+        if: needs.release-please.outputs.cli_release_created == 'true'
+        run: cargo publish -p ytdown-cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 

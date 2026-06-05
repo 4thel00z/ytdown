@@ -8,14 +8,14 @@ during network and disk I/O, so it plays well with threads.
 ## Install
 
 ```sh
-pip install ytdown-py
+uv add ytdown-py
 ```
 
 On platforms without a prebuilt wheel (anything other than Linux x86_64 and
 macOS arm64), install from source instead. This needs a Rust toolchain:
 
 ```sh
-pip install "git+https://github.com/4thel00z/ytdown#subdirectory=ytdown-py"
+uv add "git+https://github.com/4thel00z/ytdown#subdirectory=ytdown-py"
 ```
 
 ## Quickstart
