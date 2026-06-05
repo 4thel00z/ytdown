@@ -106,7 +106,7 @@ Releases are automated. When a release-please PR is merged on `master`:
    `Cargo.toml` files (`ytdown-py/Cargo.toml` is synced via the
    `x-release-please-version` annotation).
 2. `.github/workflows/release-please.yaml` publishes the crate to crates.io,
-   then builds wheels (Linux x86_64/aarch64, macOS x86_64/aarch64) via
+   then builds wheels (Linux x86_64, macOS aarch64) via
    `PyO3/maturin-action` and publishes them to PyPI.
 
 No sdist is published (maturin can't vendor the `path = ".."` dependency
