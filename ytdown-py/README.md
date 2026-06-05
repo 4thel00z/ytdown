@@ -1,18 +1,21 @@
-# ytdown (Python bindings)
+# ytdown-py
 
-Python bindings for the [`ytdown`](https://github.com/4thel00z/ytdown) Rust
-crate: extract, select, and download media — yt-dlp's core, library only.
-
-Built with [maturin](https://maturin.rs) / [PyO3](https://pyo3.rs). The API is
-synchronous; blocking calls release the GIL and run on a shared tokio runtime.
+Resolve media URLs into metadata and formats, pick a format, download it.
+Powered by the [`ytdown`](https://github.com/4thel00z/ytdown) Rust crate, so
+it is fast and dependency-free. The API is synchronous and releases the GIL
+during network and disk I/O, so it plays well with threads.
 
 ## Install
 
 ```sh
-pip install maturin
-maturin develop --release   # from this directory, inside a venv
-# or build a wheel:
-maturin build --release
+pip install ytdown-py
+```
+
+On platforms without a prebuilt wheel (anything other than Linux x86_64 and
+macOS arm64), install from source instead. This needs a Rust toolchain:
+
+```sh
+pip install "git+https://github.com/4thel00z/ytdown#subdirectory=ytdown-py"
 ```
 
 ## Quickstart
@@ -32,21 +35,85 @@ if isinstance(info, VideoInfo):
     )
 ```
 
-### Format selection
+`Ytdown()` holds a shared HTTP client. Create it once and reuse it across
+resolves and downloads. It accepts two optional keyword arguments:
 
-`VideoInfo.select()` returns a chainable `FormatSelector` mirroring the Rust
-API:
+```python
+yt = Ytdown(user_agent="my-app/1.0", ffmpeg_binary="/opt/ffmpeg/bin/ffmpeg")
+```
+
+## Inspecting a video
+
+`resolve()` returns a `VideoInfo` for single videos:
+
+```python
+info.id           # "dQw4w9WgXcQ"
+info.title        # "Rick Astley - Never Gonna Give You Up ..."
+info.duration     # 213.0 (seconds)
+info.uploader     # "Rick Astley"
+info.view_count   # 1234567
+info.upload_date  # "20091025" (YYYYMMDD)
+info.thumbnails   # [Thumbnail(url=..., width=..., height=...), ...]
+info.formats      # [Format(...), ...]
+info.to_json()    # full metadata as a JSON string
+```
+
+## Format selection
+
+`VideoInfo.select()` returns a chainable `FormatSelector`. Filters narrow the
+set, terminal methods pick a format:
 
 ```python
 fmt = info.select().progressive().max_height(720).best_video()
 audio = info.select().audio_only().best_audio()
 video, audio = info.select().best_video_audio()
 fmt = info.select().by_itag(22)
+worst = info.select().worst()
 ```
 
-### Playlists, channels, search
+Filters: `progressive()`, `video_only()`, `audio_only()`, `max_height(h)`,
+`container("mp4")`, `vcodec_starts_with("avc1")`.
 
-Collections are lazy iterators; pages are fetched on demand:
+Terminals: `best_progressive()`, `best_video()`, `best_audio()`,
+`best_video_audio()`, `worst()`, `by_itag(itag)`.
+
+Each `Format` exposes `itag`, `url`, `kind` (`"progressive"`, `"video_only"`,
+`"audio_only"`), `container`, `filesize`, `bitrate`, and nested
+`video`/`audio` stream details.
+
+## Downloading
+
+```python
+yt.download(
+    fmt,
+    "out.mp4",
+    progress=on_progress,        # callable(Progress) -> None
+    concurrency=4,               # parallel range-chunk connections
+    chunk_size=10 * 1024 * 1024, # bytes per chunk (parallel mode)
+    retries=3,
+    resume=True,                 # resume from an existing partial file
+)
+```
+
+The `progress` callback receives `Progress` snapshots with
+`bytes_downloaded`, `total_bytes`, `speed_bps`, `eta`, and `percent()`.
+
+### Merged downloads
+
+The highest quality streams are usually split into separate video and audio.
+Download both and mux them with ffmpeg (must be on `PATH`, or pass
+`ffmpeg_binary=` to `Ytdown`):
+
+```python
+video, audio = info.select().best_video_audio()
+yt.download_merged(video, audio, "out.mp4")
+```
+
+## Playlists, channels, search
+
+`resolve()` returns a `Collection` for playlists, channels, and
+`ytsearch:` queries. Collections are lazy iterators; further pages are
+fetched on demand:
 
 ```python
 from ytdown import Collection
@@ -59,30 +126,7 @@ if isinstance(result, Collection):
         break
 ```
 
-### Merged (split-stream) downloads
-
-Requires `ffmpeg` on `PATH` (or pass `ffmpeg_binary=` to `Ytdown`):
-
-```python
-video, audio = info.select().best_video_audio()
-yt.download_merged(video, audio, "out.mp4")
-```
-
-### Download options
-
-```python
-yt.download(
-    fmt,
-    "out.mp4",
-    progress=on_progress,        # callable(Progress) -> None
-    concurrency=4,               # parallel range-chunk connections
-    chunk_size=10 * 1024 * 1024, # bytes per chunk (parallel mode)
-    retries=3,
-    resume=True,                 # resume from existing partial file
-)
-```
-
-### Errors
+## Errors
 
 All errors derive from `ytdown.YtdownError`:
 
@@ -90,7 +134,7 @@ All errors derive from `ytdown.YtdownError`:
 `CipherError`, `FormatNotFoundError`, `IoError`, `PostprocessError`.
 
 ```python
-from ytdown import YtdownError, FormatNotFoundError
+from ytdown import FormatNotFoundError
 
 try:
     fmt = info.select().audio_only().by_itag(9999)
@@ -98,31 +142,6 @@ except FormatNotFoundError:
     ...
 ```
 
-## Releasing to PyPI
-
-Releases are automated. When a release-please PR is merged on `master`:
-
-1. release-please tags the release and bumps the version in both
-   `Cargo.toml` files (`ytdown-py/Cargo.toml` is synced via the
-   `x-release-please-version` annotation).
-2. `.github/workflows/release-please.yaml` publishes the crate to crates.io,
-   then builds wheels (Linux x86_64, macOS aarch64) via
-   `PyO3/maturin-action` and publishes them to PyPI.
-
-No sdist is published (maturin can't vendor the `path = ".."` dependency
-cleanly). On platforms without a wheel, install from git instead:
-
-```sh
-pip install "git+https://github.com/4thel00z/ytdown#subdirectory=ytdown-py"
-```
-
-Authentication uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
-(OIDC) — no token secret. One-time setup on pypi.org for the `ytdown` project:
-
-- **Owner**: `4thel00z`  **Repository**: `ytdown`
-- **Workflow name**: `release-please.yaml`
-- **Environment**: (leave empty)
-
 ## License
 
-MIT OR Apache-2.0, same as the Rust crate.
+MIT OR Apache-2.0.
