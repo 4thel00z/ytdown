@@ -21,6 +21,9 @@ mod progress;
 
 mod search;
 
+#[allow(dead_code)] // wired into main in the tui task
+mod picker;
+
 #[derive(Parser)]
 #[command(
     name = "ytdown",
