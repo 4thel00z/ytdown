@@ -97,9 +97,7 @@ pub async fn run(yt: &Ytdown, mp: &MultiProgress, args: &GetArgs) -> anyhow::Res
     let ffmpeg_ok = app::ffmpeg_available(&args.ffmpeg).await;
     match yt.resolve(&args.url).await? {
         MediaInfo::Single(video) => download_video(yt, mp, &video, args, ffmpeg_ok, None).await,
-        MediaInfo::Collection(_) => {
-            anyhow::bail!("collection downloads land in the next commit") // replaced in Task 12
-        }
+        MediaInfo::Collection(col) => download_collection(yt, mp, col, args, ffmpeg_ok).await,
     }
 }
 
@@ -239,6 +237,60 @@ fn part_path(dest: &Path, suffix: &str) -> PathBuf {
     match dest.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.join(name),
         _ => PathBuf::from(name),
+    }
+}
+
+/// Download every entry of a collection sequentially, honouring
+/// `--skip`/`--limit`. Per-entry failures are logged and counted; a non-zero
+/// failure count becomes a single error (exit 1) after the run.
+async fn download_collection(
+    yt: &Ytdown,
+    mp: &MultiProgress,
+    col: ytdown::CollectionInfo,
+    args: &GetArgs,
+    ffmpeg_ok: bool,
+) -> anyhow::Result<()> {
+    use futures::StreamExt;
+
+    let mut entries = col.entries.skip(args.skip);
+    let mut index = args.skip;
+    let mut attempted = 0usize;
+    let mut failed = 0usize;
+    loop {
+        if args.limit.is_some_and(|l| attempted >= l) {
+            break;
+        }
+        let Some(entry) = entries.next().await else {
+            break;
+        };
+        attempted += 1;
+        index += 1;
+        let result = match entry {
+            Err(e) => Err(anyhow::Error::from(e)),
+            Ok(entry) => download_entry(yt, mp, &entry.url, args, ffmpeg_ok, index).await,
+        };
+        if let Err(e) = result {
+            failed += 1;
+            tracing::warn!("entry {index} failed: {e:#}");
+        }
+    }
+    anyhow::ensure!(failed == 0, "{failed} of {attempted} downloads failed");
+    Ok(())
+}
+
+async fn download_entry(
+    yt: &Ytdown,
+    mp: &MultiProgress,
+    url: &str,
+    args: &GetArgs,
+    ffmpeg_ok: bool,
+    index: usize,
+) -> anyhow::Result<()> {
+    match yt.resolve(url).await? {
+        MediaInfo::Single(video) => {
+            download_video(yt, mp, &video, args, ffmpeg_ok, Some(index)).await
+        }
+        MediaInfo::Collection(_) => anyhow::bail!("nested collection skipped"),
     }
 }
 
