@@ -1,0 +1,19 @@
+#!/bin/sh
+#
+# Installed by cargo-husky (the Rust-native pre-commit alternative).
+# Runs the project gate before every commit: fmt check, clippy with warnings
+# denied, and the full test suite. Any failure aborts the commit.
+#
+# This file is the source of truth; cargo-husky copies it into .git/hooks on the
+# next `cargo build`/`cargo test`. To bypass once: `git commit --no-verify`.
+
+set -e
+
+echo '+cargo fmt --all -- --check'
+cargo fmt --all -- --check
+
+echo '+cargo clippy --all-targets --all-features -- -D warnings'
+cargo clippy --all-targets --all-features -- -D warnings
+
+echo '+cargo test --all-features'
+cargo test --all-features
