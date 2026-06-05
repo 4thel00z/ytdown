@@ -7,9 +7,11 @@ use indicatif::MultiProgress;
 use ytdown::postprocess::FfmpegMerger;
 use ytdown::{Container, Format, MediaInfo, VideoInfo, Ytdown};
 
+use std::io::IsTerminal;
+
 use crate::selector::{self, FormatSpec, Selection};
 use crate::template::{RenderCtx, Template};
-use crate::{app, progress};
+use crate::{app, picker, progress, tui};
 
 /// Arguments to `ytdown get`.
 #[derive(Args)]
@@ -112,13 +114,35 @@ async fn download_video(
     index: Option<usize>,
 ) -> anyhow::Result<()> {
     let container = args.container.map(Container::from);
-    let selection = selector::resolve(
-        args.format.as_ref(),
-        &video.formats,
-        args.max_height,
-        container.as_ref(),
-        ffmpeg_ok,
-    )?;
+    let use_tui =
+        args.format.is_none() && index.is_none() && !args.no_tui && std::io::stderr().is_terminal();
+    let selection = if use_tui {
+        let rows = picker::rows(&video.formats, args.max_height, container.as_ref());
+        match tui::pick(&video.title, rows)? {
+            None => return Ok(()),
+            Some(tui::Pick::Single(i)) => Selection::Single(&video.formats[i]),
+            Some(tui::Pick::Merged(i)) => {
+                anyhow::ensure!(
+                    ffmpeg_ok,
+                    "merging requires ffmpeg ({}); install it or pick a progressive format",
+                    args.ffmpeg.display()
+                );
+                let audio = ytdown::FormatSelector::new(&video.formats).best_audio()?;
+                Selection::Merged {
+                    video: &video.formats[i],
+                    audio,
+                }
+            }
+        }
+    } else {
+        selector::resolve(
+            args.format.as_ref(),
+            &video.formats,
+            args.max_height,
+            container.as_ref(),
+            ffmpeg_ok,
+        )?
+    };
     download_selection(yt, mp, video, selection, args, ffmpeg_ok, index).await
 }
 
