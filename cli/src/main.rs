@@ -12,6 +12,9 @@ mod template;
 #[allow(dead_code)] // wired into main in the `formats` task
 mod table;
 
+#[allow(dead_code)] // wired into main in the app task
+mod progress;
+
 #[derive(Parser)]
 #[command(
     name = "ytdown",
