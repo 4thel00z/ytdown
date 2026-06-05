@@ -3,7 +3,9 @@
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
-#[allow(dead_code)] // wired into main in the `get` task
+#[allow(dead_code)] // wired into main in the info task
+mod app;
+
 mod selector;
 
 #[allow(dead_code)] // wired into main in the `get` task
@@ -12,7 +14,6 @@ mod template;
 #[allow(dead_code)] // wired into main in the `formats` task
 mod table;
 
-#[allow(dead_code)] // wired into main in the app task
 mod progress;
 
 #[derive(Parser)]
@@ -47,12 +48,28 @@ enum Command {
     },
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
+    let mp = indicatif::MultiProgress::new();
+    progress::init_tracing(cli.verbose, cli.quiet, &mp);
+    if let Err(e) = run(cli, &mp).await {
+        eprintln!("error: {e:#}");
+        let code = if e.downcast_ref::<selector::UsageError>().is_some() {
+            2
+        } else {
+            1
+        };
+        std::process::exit(code);
+    }
+}
+
+async fn run(cli: Cli, _mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
     match cli.command {
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "ytdown", &mut std::io::stdout());
+            Ok(())
         }
     }
 }
