@@ -3,8 +3,9 @@
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
-#[allow(dead_code)] // wired into main in the info task
 mod app;
+
+mod info;
 
 mod selector;
 
@@ -46,6 +47,17 @@ enum Command {
         /// Target shell.
         shell: Shell,
     },
+    /// Print resolved metadata as JSON.
+    Info {
+        /// Video, playlist, channel, or ytsearch: URL.
+        url: String,
+        /// Pretty-print the JSON.
+        #[arg(long)]
+        pretty: bool,
+        /// Maximum number of collection entries to include.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
 }
 
 #[tokio::main]
@@ -65,11 +77,16 @@ async fn main() {
 }
 
 async fn run(cli: Cli, _mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
+    let ua = cli.user_agent.clone();
     match cli.command {
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "ytdown", &mut std::io::stdout());
             Ok(())
+        }
+        Command::Info { url, pretty, limit } => {
+            let yt = app::build_ytdown(ua.as_deref())?;
+            info::run(&yt, &url, pretty, limit).await
         }
     }
 }

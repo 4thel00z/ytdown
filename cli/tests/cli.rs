@@ -22,3 +22,13 @@ fn completions_emit_bash_script() {
         .success()
         .stdout(predicate::str::contains("ytdown"));
 }
+
+#[test]
+fn info_unsupported_url_exits_1() {
+    Command::cargo_bin("ytdown")
+        .unwrap()
+        .args(["info", "https://example.com/x"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("no extractor supports"));
+}
