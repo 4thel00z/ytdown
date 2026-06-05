@@ -143,9 +143,60 @@ ytdown search "rust async" -n 5
 ytdown get 'https://www.youtube.com/playlist?list=…' --limit 10 -o '{index} - {title}.{ext}'
 ```
 
-Run `ytdown get` on a TTY without `-f` and an interactive format picker opens;
-`--no-tui` (or piping) selects the best format automatically. Shell completions:
-`ytdown completions zsh`.
+### Subcommands
+
+| Command | Description |
+|---|---|
+| `get <URL>` | Download a video, playlist, channel, or `ytsearch:` result set |
+| `info <URL>` | Print resolved metadata as JSON (`--pretty`, `--limit` for collections) |
+| `formats <URL>` | List a video's available formats as a table (`--json`) |
+| `search <QUERY>` | List search results as a table (`-n`/`--limit`, default 10; `--json`) |
+| `completions <SHELL>` | Generate shell completions (bash, zsh, fish, …) |
+
+Global flags on every command: `-v`/`-vv` (info/debug logs), `-q` (silence logs),
+`--user-agent <UA>`. `RUST_LOG` overrides the verbosity flags when set.
+
+### Format selection (`-f`)
+
+| Value | Meaning |
+|---|---|
+| *(omitted)* | Best split video+audio merged via ffmpeg; best progressive without ffmpeg |
+| `best` | Best progressive (muxed A+V) format |
+| `bestvideo` / `bestaudio` | Best video-only / audio-only stream |
+| `22` | A specific format by itag |
+| `137+140` | Video itag + audio itag, merged via ffmpeg |
+
+`--max-height <H>` and `--container <mp4|webm>` narrow the keyword selections;
+combining them with explicit itags is rejected (exit 2). Merging needs ffmpeg
+on `PATH` or via `--ffmpeg <path>`.
+
+### Output templates (`-o`, default `{title}.{ext}`)
+
+Placeholders: `{title}` `{id}` `{ext}` `{height}` `{itag}` `{uploader}` `{index}`
+(`{index}` is the 1-based position within a playlist/channel/search download).
+Substituted values are sanitized to safe path components; literal `/` in the
+template creates directories.
+
+### Downloads
+
+`--concurrency <N>` parallel range chunks (with `--chunk-size <BYTES>`),
+`--retries <N>`, and resume of partial files by default (`--no-resume` to
+disable). Collections download entry-by-entry, honouring `--skip <N>` and
+`--limit <N>`; per-entry failures are logged and reported at the end without
+aborting the run.
+
+### Interactive picker
+
+Run `ytdown get` on a TTY without `-f` and a format picker opens: arrows to
+navigate, `/` to filter, `enter` to select (video-only formats offer pairing
+with the best audio), `q` to quit. `--no-tui` (or piping) selects the best
+format automatically. The picker and all progress/log output draw on stderr,
+so stdout stays clean for piping.
+
+### Exit codes
+
+`0` success (including quitting the picker), `1` runtime errors (network,
+extraction, download), `2` usage errors (bad flags, invalid `-f`/`-o` values).
 
 ## License
 
