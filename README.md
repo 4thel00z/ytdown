@@ -66,6 +66,23 @@ async fn main() -> ytdown::Result<()> {
 
 [`futures::StreamExt`]: https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html
 
+## Supported URLs
+
+YouTube is the only extractor registered by default (embedders can add their
+own via the [`Extractor`] trait). Accepted hosts: `youtube.com`, `www.`/`m.`/
+`music.youtube.com`, `youtube-nocookie.com`, and `youtu.be`.
+
+| Kind | URL shapes |
+|---|---|
+| Video | `…/watch?v=ID`, `youtu.be/ID`, `…/shorts/ID`, `…/embed/ID`, `…/v/ID`, `…/e/ID` |
+| Playlist | `…/playlist?list=ID`, any non-watch URL with `?list=ID` |
+| Channel | `…/channel/UC…`, `…/@handle` (streams the channel's Videos tab) |
+| Search | `ytsearch:QUERY` pseudo-URL (mirrors yt-dlp) |
+
+A watch URL that also carries `&list=` resolves to the **video** (the `v=`
+parameter wins). Anything else fails fast with `Error::UnsupportedUrl` —
+no network request is made.
+
 ## Features
 
 | Feature  | Default | Description                                                          |
