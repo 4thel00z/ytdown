@@ -32,3 +32,13 @@ fn info_unsupported_url_exits_1() {
         .code(1)
         .stderr(predicate::str::contains("no extractor supports"));
 }
+
+#[test]
+fn search_help_shows_limit_flag() {
+    Command::cargo_bin("ytdown")
+        .unwrap()
+        .args(["search", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--limit"));
+}

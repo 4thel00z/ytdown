@@ -18,6 +18,8 @@ mod formats;
 
 mod progress;
 
+mod search;
+
 #[derive(Parser)]
 #[command(
     name = "ytdown",
@@ -67,6 +69,17 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Search and list results.
+    Search {
+        /// Search query.
+        query: String,
+        /// Maximum number of results.
+        #[arg(short = 'n', long = "limit", default_value_t = 10)]
+        limit: usize,
+        /// Emit JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -100,6 +113,10 @@ async fn run(cli: Cli, _mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
         Command::Formats { url, json } => {
             let yt = app::build_ytdown(ua.as_deref())?;
             formats::run(&yt, &url, json).await
+        }
+        Command::Search { query, limit, json } => {
+            let yt = app::build_ytdown(ua.as_deref())?;
+            search::run(&yt, &query, limit, json).await
         }
     }
 }

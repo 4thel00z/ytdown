@@ -20,7 +20,6 @@ pub fn human_size(bytes: u64) -> String {
 }
 
 /// `M:SS` duration, or `-` when unknown.
-#[allow(dead_code)] // used in search (Task 10) and picker (Task 13)
 pub fn duration_str(d: Option<std::time::Duration>) -> String {
     match d {
         Some(d) => {
@@ -93,7 +92,6 @@ pub fn formats_table(formats: &[Format]) -> String {
 }
 
 /// Render the `search` results table.
-#[allow(dead_code)] // used in search (Task 10)
 pub fn entries_table(entries: &[Entry]) -> String {
     let header = ["ID", "DURATION", "TITLE", "URL"];
     let rows: Vec<Vec<String>> = entries
