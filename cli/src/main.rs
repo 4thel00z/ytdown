@@ -9,6 +9,9 @@ mod selector;
 #[allow(dead_code)] // wired into main in the `get` task
 mod template;
 
+#[allow(dead_code)] // wired into main in the `formats` task
+mod table;
+
 #[derive(Parser)]
 #[command(
     name = "ytdown",
