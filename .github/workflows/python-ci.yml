@@ -1,0 +1,81 @@
+name: python-ci
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "ytdown-py/**"
+      - "src/**"
+      - "Cargo.toml"
+      - ".github/workflows/python-ci.yml"
+  pull_request:
+    paths:
+      - "ytdown-py/**"
+      - "src/**"
+      - "Cargo.toml"
+      - ".github/workflows/python-ci.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: fmt + clippy (ytdown-py)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ytdown-py
+      - run: cargo fmt --all -- --check
+        working-directory: ytdown-py
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: ytdown-py
+
+  build:
+    name: wheel (${{ matrix.platform.runner }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-latest
+            target: x86_64
+          - runner: macos-latest
+            target: aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ytdown-py
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
+          sccache: true
+      - name: Import smoke test
+        if: matrix.platform.target == 'x86_64' || runner.os == 'macOS'
+        shell: bash
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install ytdown-py/dist/*.whl
+          /tmp/venv/bin/python -c "
+          import ytdown
+          from ytdown import Ytdown, UnsupportedUrlError
+          yt = Ytdown()
+          try:
+              yt.resolve('https://example.com/nope')
+          except UnsupportedUrlError:
+              pass
+          print('ok', ytdown.__version__)
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-wheels-${{ runner.os }}-${{ matrix.platform.target }}
+          path: ytdown-py/dist

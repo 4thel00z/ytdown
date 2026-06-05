@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "ytdown-py"
+description = "Python bindings for ytdown: extract, select, and download media (yt-dlp core in Rust)."
+readme = "README.md"
+license = { text = "MIT OR Apache-2.0" }
+requires-python = ">=3.10"
+keywords = ["youtube", "download", "media", "yt-dlp"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Multimedia :: Video",
+]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/4thel00z/ytdown"
+
+[tool.maturin]
+# Pure-Rust extension module; version comes from Cargo.toml.
+module-name = "ytdown"

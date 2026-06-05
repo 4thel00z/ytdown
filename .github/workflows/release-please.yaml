@@ -32,3 +32,68 @@ jobs:
       - run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # --- Python bindings (ytdown-py) ----------------------------------------
+  # The PyPI publish chains off this workflow (like the crates.io publish)
+  # because tags created by release-please's GITHUB_TOKEN do not trigger
+  # `on: push: tags` workflows.
+
+  pypi-wheels:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-latest
+            target: x86_64
+          - runner: ubuntu-latest
+            target: aarch64
+          - runner: macos-15-intel
+            target: x86_64
+          - runner: macos-latest
+            target: aarch64
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ytdown-py
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ runner.os }}-${{ matrix.platform.target }}
+          path: ytdown-py/dist
+
+  # No sdist: maturin cannot vendor the `path = ".."` dependency without file
+  # collisions (both crates ship a README.md). Source installs work from git:
+  #   pip install "git+https://github.com/4thel00z/ytdown#subdirectory=ytdown-py"
+
+  publish-pypi:
+    needs: [release-please, pypi-wheels]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      # Trusted Publishing (OIDC) — no API token needed.
+      id-token: write
+      # Artifact attestation.
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: wheels-*/*
+      - name: Collect distributions
+        run: |
+          mkdir -p dist
+          cp wheels-*/* dist/
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
