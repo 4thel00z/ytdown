@@ -12,8 +12,8 @@ set -e
 echo '+cargo fmt --all -- --check'
 cargo fmt --all -- --check
 
-echo '+cargo clippy --all-targets --all-features -- -D warnings'
-cargo clippy --all-targets --all-features -- -D warnings
+echo '+cargo clippy --workspace --all-targets --all-features -- -D warnings'
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-echo '+cargo test --all-features'
-cargo test --all-features
+echo '+cargo test --workspace --all-features'
+cargo test --workspace --all-features
