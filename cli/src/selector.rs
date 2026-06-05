@@ -1,6 +1,6 @@
 //! Parsing and resolving the `-f` format-selection flag.
 
-use ytdown::{Container, Format, FormatSelector};
+use ytdown::{Container, Format, FormatKind, FormatSelector};
 
 /// An argument/usage error: `main` maps it to exit code 2.
 #[derive(Debug)]
@@ -113,7 +113,11 @@ pub fn resolve<'a>(
         None => {
             if ffmpeg_available {
                 if let Ok((video, audio)) = filtered().best_video_audio() {
-                    return Ok(Selection::Merged { video, audio });
+                    if matches!(video.kind(), FormatKind::VideoOnly)
+                        && matches!(audio.kind(), FormatKind::AudioOnly)
+                    {
+                        return Ok(Selection::Merged { video, audio });
+                    }
                 }
             }
             Ok(Selection::Single(filtered().best_progressive()?))
@@ -233,5 +237,12 @@ mod tests {
         let formats = vec![progressive(22, 720), progressive(37, 1080)];
         let sel = resolve(Some(&FormatSpec::Best), &formats, Some(720), None, false).unwrap();
         assert_eq!(itag(&sel), 22);
+    }
+
+    #[test]
+    fn default_with_ffmpeg_but_only_progressive_stays_single() {
+        let formats = vec![progressive(22, 720)];
+        let sel = resolve(None, &formats, None, None, true).unwrap();
+        assert!(matches!(sel, Selection::Single(_)));
     }
 }
