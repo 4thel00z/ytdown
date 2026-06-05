@@ -121,6 +121,16 @@ impl YtdownBuilder {
         self
     }
 
+    /// Remove all registered extractors, including the default YouTube one.
+    ///
+    /// Use together with [`extractor`](Self::extractor) to take full control
+    /// over which extractors run — e.g. a [`YoutubeExtractor`] pointed at a
+    /// mock server in tests.
+    pub fn clear_extractors(mut self) -> Self {
+        self.extractors.clear();
+        self
+    }
+
     /// Finish building.
     ///
     /// Returns an [`Error::Network`] if the default HTTP client cannot be built.
@@ -312,5 +322,17 @@ mod tests {
         assert_eq!(builder.options.chunk_size, 1234);
         assert_eq!(builder.options.retries, 7);
         assert!(!builder.options.resume);
+    }
+
+    /// `clear_extractors` removes the default YouTube extractor, so nothing
+    /// matches and embedders can register their own (e.g. a mock-server one).
+    #[tokio::test]
+    async fn clear_extractors_removes_defaults() {
+        let yt = Ytdown::builder().clear_extractors().build().expect("build");
+        let err = yt
+            .resolve("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::UnsupportedUrl(_)));
     }
 }
