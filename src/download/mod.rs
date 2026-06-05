@@ -119,10 +119,15 @@ impl Downloader {
         let downloaded = Arc::new(AtomicU64::new(existing));
         let (tick_handle, tick_stop) = spawn_progress_ticker(&opts, downloaded.clone(), info.total);
 
-        let use_parallel =
-            opts.concurrency > 1 && info.accepts_ranges && info.total.is_some() && existing == 0;
+        // Prefer bounded range chunks whenever the server supports them and the
+        // size is known: some CDNs (notably YouTube's googlevideo) throttle a
+        // single full-file GET to ~playback speed but serve bounded ranges at
+        // full speed. `concurrency` then just controls how many chunks run at
+        // once (1 = sequential). Resuming an existing partial still uses a
+        // single ranged GET from the offset.
+        let use_chunked = info.accepts_ranges && info.total.is_some() && existing == 0;
 
-        let result = if use_parallel {
+        let result = if use_chunked {
             self.download_parallel(url, dest, &opts, info.total.unwrap_or(0), &downloaded)
                 .await
         } else {
@@ -966,10 +971,18 @@ mod tests {
         // The file must be rewritten to exactly the real body.
         assert_eq!(std::fs::read(&dest).unwrap(), body);
 
-        // No resume range may have been issued (only the bytes=0-0 probe is allowed).
+        // The oversized partial must be discarded, not resumed from: no Range may
+        // start at or past the discarded partial's length (the probe `bytes=0-0`
+        // and from-scratch chunk ranges anchored at 0 are fine).
         let recorded = ranges.lock().unwrap();
+        let resume_start = body.len() as u64; // first byte beyond the real body
         assert!(
-            recorded.iter().all(|r| r == "bytes=0-0"),
+            !recorded.iter().any(|r| {
+                r.strip_prefix("bytes=")
+                    .and_then(|s| s.split('-').next())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .is_some_and(|start| start >= resume_start)
+            }),
             "oversized partial must not trigger a resume Range, got {recorded:?}"
         );
     }

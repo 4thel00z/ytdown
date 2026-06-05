@@ -191,11 +191,17 @@ impl YoutubeExtractor {
             Err(_) => None,
         };
 
-        // Try clients in order; age-restriction (LOGIN_REQUIRED → AgeRestricted)
-        // falls through to embedded clients that can sometimes still play it.
+        // Try clients in order (ANDROID_VR first for ungated download URLs),
+        // falling through on any per-client failure.
         let response = self.fetch_player_with_fallback(&it, id, sts).await?;
 
-        let details = &response.video_details;
+        let details = response
+            .video_details
+            .as_ref()
+            .ok_or_else(|| Error::Extraction {
+                stage: "player",
+                message: "playable response missing videoDetails".into(),
+            })?;
         let microformat = response
             .microformat
             .as_ref()
@@ -253,21 +259,29 @@ impl YoutubeExtractor {
         id: &str,
         sts: Option<u64>,
     ) -> Result<PlayerResponse> {
+        // A `visitorData` session token: the primary ANDROID_VR client answers
+        // LOGIN_REQUIRED without it. Best-effort — `None` simply omits it (and
+        // mock servers that don't implement `visitor_id` still work).
+        let visitor = it.visitor_data().await;
+
+        // ANDROID_VR first: its `videoplayback` URLs are not Proof-of-Origin
+        // gated, so full-length downloads succeed without a PO token (the plain
+        // ANDROID/IOS clients now 403 on ranges past ~256 KiB). The rest are
+        // fallbacks for videos VR can't play (age-restricted, embeds, etc.).
         let mut last_err = None;
-        for client in [ClientKind::Android, ClientKind::Tv, ClientKind::Ios] {
-            match it.player(id, client, sts).await {
+        for client in [
+            ClientKind::AndroidVr,
+            ClientKind::Ios,
+            ClientKind::Tv,
+            ClientKind::Android,
+        ] {
+            match it.player(id, client, sts, visitor.as_deref()).await {
                 Ok(resp) => return Ok(resp),
-                Err(Error::Unavailable {
-                    reason: crate::error::UnavailableReason::AgeRestricted,
-                    message,
-                }) => {
-                    last_err = Some(Error::Unavailable {
-                        reason: crate::error::UnavailableReason::AgeRestricted,
-                        message,
-                    });
+                Err(e) => {
+                    tracing::debug!(?client, error = %e, "player client failed; trying next");
+                    last_err = Some(e);
                     continue;
                 }
-                Err(other) => return Err(other),
             }
         }
         Err(last_err.unwrap_or_else(|| Error::Extraction {

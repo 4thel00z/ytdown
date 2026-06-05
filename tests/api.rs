@@ -130,11 +130,9 @@ async fn download_builder_resume_false_redownloads_from_scratch() {
 
     assert_eq!(std::fs::read(&dest).expect("read"), body);
     let seen = ranges.lock().expect("lock");
-    assert!(
-        seen.iter()
-            .all(|r| r.as_deref() == Some("bytes=0-0") || r.is_none()),
-        "resume(false) must not send a resume Range, saw {seen:?}"
-    );
+    // resume(false) re-downloads from scratch: it may use the size probe
+    // (bytes=0-0) and full-file chunk ranges starting at offset 0, but must
+    // never send a *resume* range anchored at the discarded partial's length.
     assert!(
         !seen.iter().any(|r| r.as_deref() == Some("bytes=1500-")),
         "resume(false) must not send bytes=1500-, saw {seen:?}"

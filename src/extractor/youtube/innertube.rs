@@ -84,6 +84,11 @@ pub(crate) enum ClientKind {
     Web,
     /// Android mobile app client.
     Android,
+    /// Android XR (Oculus Quest) client. Unlike the plain Android client, its
+    /// `videoplayback` URLs are not Proof-of-Origin-gated, so full-length ranged
+    /// downloads succeed without a PO token. Requires a `visitorData` token in
+    /// the request context, or it answers `LOGIN_REQUIRED`.
+    AndroidVr,
     /// iOS mobile app client.
     Ios,
     /// Embedded TV/living-room client (useful for age-restricted content).
@@ -132,6 +137,20 @@ impl ClientKind {
                     "androidSdkVersion": 34,
                     "osName": "Android",
                     "osVersion": "14",
+                }),
+            },
+            ClientKind::AndroidVr => ClientParams {
+                client_name: "ANDROID_VR",
+                client_name_id: 28,
+                client_version: "1.60.19",
+                user_agent: "com.google.android.apps.youtube.vr.oculus/1.60.19 \
+                             (Linux; U; Android 12; GB) gzip",
+                extras: serde_json::json!({
+                    "androidSdkVersion": 32,
+                    "deviceMake": "Oculus",
+                    "deviceModel": "Quest 3",
+                    "osName": "Android",
+                    "osVersion": "12",
                 }),
             },
             ClientKind::Ios => ClientParams {
@@ -186,7 +205,11 @@ impl InnerTube {
     }
 
     /// Build the `context` object for a given client.
-    fn context(client: ClientKind) -> serde_json::Value {
+    ///
+    /// When `visitor_data` is supplied it is merged into `context.client`; some
+    /// clients (notably [`ClientKind::AndroidVr`]) answer `LOGIN_REQUIRED`
+    /// without it.
+    fn context(client: ClientKind, visitor_data: Option<&str>) -> serde_json::Value {
         let params = client.params();
         let mut clientv = serde_json::json!({
             "clientName": params.client_name,
@@ -194,12 +217,37 @@ impl InnerTube {
             "hl": "en",
             "gl": "US",
         });
-        if let (Some(obj), Some(extra)) = (clientv.as_object_mut(), params.extras.as_object()) {
-            for (k, v) in extra {
-                obj.insert(k.clone(), v.clone());
+        if let Some(obj) = clientv.as_object_mut() {
+            if let Some(extra) = params.extras.as_object() {
+                for (k, v) in extra {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+            if let Some(vd) = visitor_data {
+                obj.insert(
+                    "visitorData".into(),
+                    serde_json::Value::String(vd.to_string()),
+                );
             }
         }
         serde_json::json!({ "client": clientv })
+    }
+
+    /// Best-effort fetch of a `visitorData` session token via the `visitor_id`
+    /// endpoint. Returns `None` on any failure; callers proceed without it.
+    pub async fn visitor_data(&self) -> Option<String> {
+        let body = serde_json::json!({ "context": Self::context(ClientKind::Web, None) });
+        let resp = self.post("visitor_id", ClientKind::Web, body).await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let value: serde_json::Value =
+            read_bounded_json(resp, "innertube/visitor_id").await.ok()?;
+        value
+            .get("responseContext")?
+            .get("visitorData")?
+            .as_str()
+            .map(str::to_string)
     }
 
     /// POST a JSON body to a `youtubei/v1` endpoint, returning the response.
@@ -251,10 +299,11 @@ impl InnerTube {
         video_id: &str,
         client: ClientKind,
         sts: Option<u64>,
+        visitor_data: Option<&str>,
     ) -> Result<PlayerResponse> {
         let mut body = serde_json::json!({
             "videoId": video_id,
-            "context": Self::context(client),
+            "context": Self::context(client, visitor_data),
             "contentCheckOk": true,
             "racyCheckOk": true,
         });
@@ -275,7 +324,7 @@ impl InnerTube {
     /// Fetch a `browse` response (playlist/channel) as a raw JSON value.
     pub async fn browse(&self, req: BrowseRequest) -> Result<serde_json::Value> {
         let client = ClientKind::Web;
-        let mut body = serde_json::json!({ "context": Self::context(client) });
+        let mut body = serde_json::json!({ "context": Self::context(client, None) });
         if let Some(obj) = body.as_object_mut() {
             if let Some(id) = req.browse_id {
                 obj.insert("browseId".into(), serde_json::Value::String(id));
@@ -299,7 +348,7 @@ impl InnerTube {
     pub async fn resolve_url(&self, url: &str) -> Result<serde_json::Value> {
         let client = ClientKind::Web;
         let body = serde_json::json!({
-            "context": Self::context(client),
+            "context": Self::context(client, None),
             "url": url,
         });
         let resp = self.post("navigation/resolve_url", client, body).await?;
@@ -320,11 +369,11 @@ impl InnerTube {
         let client = ClientKind::Web;
         let body = match continuation {
             Some(cont) => serde_json::json!({
-                "context": Self::context(client),
+                "context": Self::context(client, None),
                 "continuation": cont,
             }),
             None => serde_json::json!({
-                "context": Self::context(client),
+                "context": Self::context(client, None),
                 "query": query,
                 "params": "EgIQAQ%3D%3D",
             }),
@@ -340,8 +389,13 @@ impl InnerTube {
 pub(crate) struct PlayerResponse {
     /// Whether the video is playable, and why not if it isn't.
     pub playability_status: PlayabilityStatus,
-    /// Core video metadata.
-    pub video_details: VideoDetails,
+    /// Core video metadata. Optional because non-playable responses (e.g.
+    /// `LOGIN_REQUIRED`) omit it; keeping it optional lets such responses
+    /// deserialize so [`PlayabilityStatus::ensure_ok`] maps them to a typed
+    /// error instead of failing as a missing field (which would abort the
+    /// client fallback loop).
+    #[serde(default)]
+    pub video_details: Option<VideoDetails>,
     /// Stream descriptors (absent for unplayable videos).
     pub streaming_data: Option<StreamingData>,
     /// Extra metadata (upload date, etc.).
@@ -547,10 +601,10 @@ mod tests {
 
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
         let resp = it
-            .player("dQw4w9WgXcQ", ClientKind::Android, None)
+            .player("dQw4w9WgXcQ", ClientKind::Android, None, None)
             .await
             .unwrap();
-        assert_eq!(resp.video_details.video_id, "dQw4w9WgXcQ");
+        assert_eq!(resp.video_details.unwrap().video_id, "dQw4w9WgXcQ");
         assert_eq!(resp.streaming_data.unwrap().formats.len(), 1);
     }
 
@@ -600,7 +654,7 @@ mod tests {
 
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
         // Mismatched headers/sts would 404 the mock -> error; success proves them.
-        it.player("dQw4w9WgXcQ", ClientKind::Android, Some(19834))
+        it.player("dQw4w9WgXcQ", ClientKind::Android, Some(19834), None)
             .await
             .unwrap();
     }
@@ -641,7 +695,7 @@ mod tests {
 
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
         // A mismatched UA/extras would not match the mock and 404 -> error.
-        it.player("dQw4w9WgXcQ", ClientKind::Ios, None)
+        it.player("dQw4w9WgXcQ", ClientKind::Ios, None, None)
             .await
             .unwrap();
     }
@@ -699,7 +753,7 @@ mod tests {
 
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
         let resp = it
-            .player("dQw4w9WgXcQ", ClientKind::Android, None)
+            .player("dQw4w9WgXcQ", ClientKind::Android, None, None)
             .await
             .unwrap();
         let sd = resp.streaming_data.unwrap();
@@ -785,7 +839,9 @@ mod tests {
             .mount(&server)
             .await;
         let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
-        it.player("x", ClientKind::Web, None).await.unwrap_err()
+        it.player("x", ClientKind::Web, None, None)
+            .await
+            .unwrap_err()
     }
 
     #[tokio::test]
