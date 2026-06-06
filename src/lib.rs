@@ -52,6 +52,8 @@ pub use download::{DownloadOptions, Progress};
 pub use error::{Error, Result};
 pub use extractor::{Extractor, ExtractorContext, Registry};
 pub use format::FormatSelector;
+#[cfg(not(target_arch = "wasm32"))]
+pub use transport::ReqwestClient;
 pub use transport::{HttpClient, HttpRequest, HttpResponse, Method};
 pub use types::*;
 

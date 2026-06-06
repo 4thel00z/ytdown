@@ -108,6 +108,99 @@ pub trait HttpClient: Send + Sync {
     async fn execute(&self, req: HttpRequest) -> Result<HttpResponse>;
 }
 
+/// Maximum control-plane response body buffered by default (32 MiB).
+#[cfg(not(target_arch = "wasm32"))]
+pub const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Native [`HttpClient`] backed by a [`reqwest::Client`].
+#[cfg(not(target_arch = "wasm32"))]
+pub struct ReqwestClient {
+    http: reqwest::Client,
+    max_bytes: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ReqwestClient {
+    /// Wrap an existing client with the default body cap.
+    pub fn new(http: reqwest::Client) -> Self {
+        Self {
+            http,
+            max_bytes: MAX_RESPONSE_BYTES,
+        }
+    }
+
+    /// Wrap a client with a custom body cap (testing).
+    pub fn with_max_bytes(http: reqwest::Client, max_bytes: u64) -> Self {
+        Self { http, max_bytes }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait::async_trait]
+impl HttpClient for ReqwestClient {
+    async fn execute(&self, req: HttpRequest) -> Result<HttpResponse> {
+        use crate::error::Error;
+        use futures::StreamExt;
+
+        let mut builder = match req.method {
+            Method::Get => self.http.get(&req.url),
+            Method::Post => self.http.post(&req.url),
+        };
+        for (k, v) in &req.headers {
+            builder = builder.header(k.as_str(), v.as_str());
+        }
+        if let Some(body) = req.body {
+            builder = builder.body(body);
+        }
+        let resp = builder.send().await.map_err(|e| Error::Network {
+            stage: req.stage,
+            message: e.to_string(),
+        })?;
+
+        let status = resp.status().as_u16();
+        let headers = resp
+            .headers()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str().to_ascii_lowercase(),
+                    v.to_str().unwrap_or("").to_string(),
+                )
+            })
+            .collect();
+
+        if let Some(len) = resp.content_length() {
+            if len > self.max_bytes {
+                return Err(Error::Extraction {
+                    stage: req.stage,
+                    message: format!("response body too large: {len} bytes"),
+                });
+            }
+        }
+        let mut buf = Vec::new();
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| Error::Network {
+                stage: req.stage,
+                message: e.to_string(),
+            })?;
+            if buf.len() as u64 + chunk.len() as u64 > self.max_bytes {
+                return Err(Error::Extraction {
+                    stage: req.stage,
+                    message: "response body exceeded size limit".into(),
+                });
+            }
+            buf.extend_from_slice(&chunk);
+        }
+
+        Ok(HttpResponse {
+            status,
+            headers,
+            body: buf,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +238,48 @@ mod tests {
         assert_eq!(r.url, "https://x.test/base.js");
         assert!(r.headers.is_empty());
         assert!(r.body.is_none());
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod reqwest_tests {
+    use super::*;
+    use wiremock::matchers::{method as m, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn reqwest_client_executes_get_and_buffers_body() {
+        let server = MockServer::start().await;
+        Mock::given(m("GET"))
+            .and(path("/hi"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("pong"))
+            .mount(&server)
+            .await;
+
+        let client = ReqwestClient::new(reqwest::Client::new());
+        let resp = client
+            .execute(HttpRequest::get("test", format!("{}/hi", server.uri())))
+            .await
+            .unwrap();
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.body, b"pong");
+    }
+
+    #[tokio::test]
+    async fn reqwest_client_rejects_oversized_body() {
+        let server = MockServer::start().await;
+        let huge = "x".repeat(64);
+        Mock::given(m("GET"))
+            .and(path("/big"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(&huge))
+            .mount(&server)
+            .await;
+
+        let client = ReqwestClient::with_max_bytes(reqwest::Client::new(), 8);
+        let err = client
+            .execute(HttpRequest::get("test", format!("{}/big", server.uri())))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::Error::Extraction { .. }));
     }
 }
