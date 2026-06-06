@@ -8,7 +8,7 @@ RESET  := \033[0m
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help build test lint fmt fmt-check doc check clean install
+.PHONY: help build test lint fmt fmt-check doc check clean install wasm serve
 
 help: ## List the most important targets
 	@printf "$(BOLD)ytdown$(RESET) — workspace targets\n\n"
@@ -48,9 +48,18 @@ doc: ## Build API docs (no deps)
 check: fmt-check lint test ## Full gate: fmt-check + lint + test (same as pre-commit)
 	@printf "$(GREEN)✓ check — all gates passed$(RESET)\n"
 
-install: ## Install the ytdown CLI from this checkout
-	@printf "$(YELLOW)▶ install$(RESET) cargo install --path cli\n"
-	@cargo install --path cli
+wasm: ## Build the browser WASM bundle (web/wasm) via wasm-pack
+	@printf "$(YELLOW)▶ wasm$(RESET) bun run build:wasm\n"
+	@cd web && bun run build:wasm
+	@printf "$(GREEN)✓ wasm$(RESET)\n"
+
+serve: wasm ## Run the browser demo + local proxy (cargo run --features serve)
+	@printf "$(YELLOW)▶ serve$(RESET) cargo run -p ytdown-cli --features serve -- serve --open\n"
+	@cargo run -p ytdown-cli --features serve -- serve --open
+
+install: wasm ## Install the ytdown CLI (with the 'serve' demo subcommand)
+	@printf "$(YELLOW)▶ install$(RESET) cargo install --path cli --features serve\n"
+	@cargo install --path cli --features serve
 	@printf "$(GREEN)✓ install$(RESET)\n"
 
 clean: ## Remove build artifacts
