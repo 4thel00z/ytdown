@@ -96,8 +96,11 @@ async function downloadToDisk(url, { filename, proxyUrl, mech, onProgress }) {
   let received = 0;
   const report = (n) => { received += n; onProgress?.(total ? (received / total) * 100 : undefined); };
   const picker = globalThis.showSaveFilePicker;
-  const useFs = mech === "fsapi" || (mech === "auto" && typeof picker === "function");
-  if (useFs && typeof picker === "function") {
+  const wantFs = mech === "fsapi" || (mech === "auto" && typeof picker === "function");
+  if (wantFs) {
+    if (typeof picker !== "function") {
+      throw new Error("File System Access API is unavailable in this browser; pick Blob or Auto.");
+    }
     const handle = await picker({ suggestedName: filename });
     const writable = await handle.createWritable();
     const reader = res.body.getReader();
