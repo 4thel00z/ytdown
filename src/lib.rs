@@ -178,6 +178,23 @@ impl YtdownBuilder {
             ffmpeg_binary: self.ffmpeg_binary,
         })
     }
+
+    /// Build a [`Ytdown`] from a pre-constructed transport (wasm/browser path).
+    ///
+    /// The native [`build`](Self::build) constructs a `reqwest`-based transport
+    /// and a downloader; in the browser there is neither, so the host supplies
+    /// the transport (an [`HttpClient`] backed by a JS `fetch` callback) and the
+    /// resulting `Ytdown` resolves URLs only (byte downloads happen host-side).
+    #[cfg(target_arch = "wasm32")]
+    pub fn build_with_transport(
+        self,
+        transport: std::sync::Arc<dyn transport::HttpClient>,
+    ) -> Ytdown {
+        Ytdown {
+            ctx: ExtractorContext::new(transport),
+            registry: Registry::new(self.extractors),
+        }
+    }
 }
 
 impl Ytdown {
