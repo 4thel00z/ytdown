@@ -140,8 +140,11 @@ ones — before forwarding to YouTube.
 
 ### Try it locally
 
-Build the wasm, then run the demo server (behind the `serve` feature):
+Run the demo server (behind the `serve` feature) — `make serve` builds the wasm
+bundle and launches it:
 
+    make serve
+    # equivalent to:
     cd web && bun run build:wasm
     cargo run -p ytdown-cli --features serve -- serve --open
 
@@ -149,8 +152,10 @@ Build the wasm, then run the demo server (behind the `serve` feature):
 `http://127.0.0.1:8080`, so resolving and downloading work with no extra setup.
 The page offers preset downloads (best progressive / audio / video), a
 download-mechanism toggle (File System Access streaming or Blob), and a bulk
-mode for multiple URLs. A standalone copy of the page (wasm inlined) is produced
-by `cd web/demo && bun build.mjs` (writes `web/demo/index.html`).
+mode for multiple URLs. To install the `ytdown` binary with the `serve`
+subcommand baked in, use `make install` (runs `cargo install --path cli
+--features serve`). A standalone copy of the page (wasm inlined) is produced by
+`make wasm && cd web/demo && bun build.mjs` (writes `web/demo/index.html`).
 
 ## Features
 
@@ -238,6 +243,7 @@ ytdown get 'https://www.youtube.com/playlist?list=…' --limit 10 -o '{index} - 
 | `formats <URL>` | List a video's available formats as a table (`--json`) |
 | `search <QUERY>` | List search results as a table (`-n`/`--limit`, default 10; `--json`) |
 | `completions <SHELL>` | Generate shell completions (bash, zsh, fish, …) |
+| `serve` | Serve the browser (WASM) demo + a local CORS proxy (`--port`, `--open`); requires building with `--features serve` |
 
 Global flags on every command: `-v`/`-vv` (info/debug logs), `-q` (silence logs),
 `--user-agent <UA>`. `RUST_LOG` overrides the verbosity flags when set.
