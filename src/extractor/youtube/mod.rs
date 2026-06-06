@@ -352,7 +352,9 @@ impl YoutubeExtractor {
     /// Fetch + solve the player JS for the current player version, caching the
     /// result so it is reused across formats and across videos sharing a version.
     async fn solved_player(&self, ctx: &ExtractorContext) -> Result<Arc<SolvedPlayer>> {
-        let (version, js) = fetch_player_js(&ctx.http, &self.base_url).await?;
+        // temporary: ctx.http becomes Arc<dyn HttpClient> in Task 6
+        let transport = crate::transport::ReqwestClient::new(ctx.http.clone());
+        let (version, js) = fetch_player_js(&transport, &self.base_url).await?;
         {
             let cache = ctx.player_cache.lock().await;
             if let Some(found) = cache.get(&version) {

@@ -425,25 +425,25 @@ fn balanced_braces(s: &str) -> Option<String> {
 /// `{base}/s/player/{version}/player_ias.vflset/en_US/base.js`. The version key is
 /// suitable for caching solved players across videos.
 pub(crate) async fn fetch_player_js(
-    http: &reqwest::Client,
+    http: &dyn crate::transport::HttpClient,
     base: &str,
 ) -> crate::Result<(String, String)> {
+    use crate::transport::HttpRequest;
     let base = base.trim_end_matches('/');
-    let iframe_url = format!("{base}/iframe_api");
+
     let iframe_resp = http
-        .get(&iframe_url)
-        .send()
-        .await
-        .map_err(|source| Error::Network {
+        .execute(HttpRequest::get(
+            "fetch_iframe_api",
+            format!("{base}/iframe_api"),
+        ))
+        .await?;
+    if !iframe_resp.is_success() {
+        return Err(Error::Network {
             stage: "fetch_iframe_api",
-            message: source.to_string(),
-        })?
-        .error_for_status()
-        .map_err(|source| Error::Network {
-            stage: "fetch_iframe_api",
-            message: source.to_string(),
-        })?;
-    let iframe_bytes = read_bounded_reqwest(iframe_resp, "fetch_iframe_api").await?;
+            message: format!("status {}", iframe_resp.status),
+        });
+    }
+    let iframe_bytes = super::innertube::read_bounded(iframe_resp, "fetch_iframe_api")?;
     let iframe = String::from_utf8_lossy(&iframe_bytes).into_owned();
 
     static VER_RE: OnceLock<Option<Regex>> = OnceLock::new();
@@ -463,60 +463,18 @@ pub(crate) async fn fetch_player_js(
 
     let player_url = format!("{base}/s/player/{version}/player_ias.vflset/en_US/base.js");
     let js_resp = http
-        .get(&player_url)
-        .send()
-        .await
-        .map_err(|source| Error::Network {
+        .execute(HttpRequest::get("fetch_player_js", player_url))
+        .await?;
+    if !js_resp.is_success() {
+        return Err(Error::Network {
             stage: "fetch_player_js",
-            message: source.to_string(),
-        })?
-        .error_for_status()
-        .map_err(|source| Error::Network {
-            stage: "fetch_player_js",
-            message: source.to_string(),
-        })?;
-    let js_bytes = read_bounded_reqwest(js_resp, "fetch_player_js").await?;
+            message: format!("status {}", js_resp.status),
+        });
+    }
+    let js_bytes = super::innertube::read_bounded(js_resp, "fetch_player_js")?;
     let js = String::from_utf8_lossy(&js_bytes).into_owned();
 
     Ok((version, js))
-}
-
-/// Buffer a `reqwest::Response` body up to [`super::innertube::MAX_RESPONSE_BYTES`].
-///
-/// Temporary: `fetch_player_js` still streams from `reqwest` directly; it is
-/// rewired through the [`crate::transport::HttpClient`] trait in a later task,
-/// at which point this helper is removed in favour of `innertube::read_bounded`
-/// over a buffered `HttpResponse`.
-async fn read_bounded_reqwest(
-    resp: reqwest::Response,
-    stage: &'static str,
-) -> crate::Result<Vec<u8>> {
-    use futures::StreamExt;
-    let max = super::innertube::MAX_RESPONSE_BYTES;
-    if let Some(len) = resp.content_length() {
-        if len > max {
-            return Err(Error::Extraction {
-                stage,
-                message: format!("response body too large: {len} bytes"),
-            });
-        }
-    }
-    let mut buf = Vec::new();
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|source| Error::Network {
-            stage,
-            message: source.to_string(),
-        })?;
-        if buf.len() as u64 + chunk.len() as u64 > max {
-            return Err(Error::Extraction {
-                stage,
-                message: "response body exceeded size limit".into(),
-            });
-        }
-        buf.extend_from_slice(&chunk);
-    }
-    Ok(buf)
 }
 
 /// Apply a solved player to a [`RawFormat`]'s `signatureCipher` or direct URL,
@@ -777,9 +735,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let (version, js) = fetch_player_js(&reqwest::Client::new(), &server.uri())
-            .await
-            .unwrap();
+        let client = crate::transport::ReqwestClient::new(reqwest::Client::new());
+        let (version, js) = fetch_player_js(&client, &server.uri()).await.unwrap();
         assert_eq!(version, "abcd1234");
         assert_eq!(js, "var sig=1;");
     }
@@ -796,9 +753,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = fetch_player_js(&reqwest::Client::new(), &server.uri())
-            .await
-            .unwrap_err();
+        let client = crate::transport::ReqwestClient::new(reqwest::Client::new());
+        let err = fetch_player_js(&client, &server.uri()).await.unwrap_err();
         assert!(matches!(err, crate::Error::Extraction { .. }));
     }
 
