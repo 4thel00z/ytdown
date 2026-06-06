@@ -9,6 +9,10 @@
     "cli": {
       "release-type": "rust",
       "package-name": "ytdown-cli"
+    },
+    "web": {
+      "release-type": "node",
+      "package-name": "@4thel00z/ytdown"
     }
   },
   "plugins": ["cargo-workspace"]

@@ -19,6 +19,7 @@ jobs:
       releases_created: ${{ steps.rp.outputs.releases_created }}
       lib_release_created: ${{ steps.rp.outputs.release_created }}
       cli_release_created: ${{ steps.rp.outputs['cli--release_created'] }}
+      web_release_created: ${{ steps.rp.outputs['web--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: rp
@@ -45,6 +46,37 @@ jobs:
         run: cargo publish -p ytdown-cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-npm:
+    needs: release-please
+    if: needs.release-please.outputs.web_release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for npm publish --provenance
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install SDK deps
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: Build SDK (wasm + tsup)
+        working-directory: web
+        run: bun run build
+      - name: Publish to npm
+        working-directory: web
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # --- Python bindings (ytdown-py) ----------------------------------------
   # The PyPI publish chains off this workflow (like the crates.io publish)
