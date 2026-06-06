@@ -74,13 +74,14 @@ impl Downloader {
     /// Download `url` to `dest`.
     ///
     /// A ranged probe `GET` discovers the content length and whether the server
-    /// supports range requests. With `concurrency == 1` (or no range support)
-    /// the body is streamed via a single `GET` (resuming from any existing
-    /// partial file when `resume` is set); otherwise the file is split into
-    /// `chunk_size` ranges downloaded with bounded concurrency and written at
-    /// their offsets. Progress is aggregated through a shared atomic counter
-    /// and emitted through the optional callback on a ~250ms tick and at
-    /// completion.
+    /// supports range requests. When ranges are supported and the size is
+    /// known, the file is split into `chunk_size` ranges downloaded with
+    /// `concurrency` parallelism and written at their offsets; resuming an
+    /// existing partial (when `resume` is set) instead appends the remaining
+    /// tail as sequential bounded chunks. Without range support the body is
+    /// streamed via a single `GET`. Progress is aggregated through a shared
+    /// atomic counter and emitted through the optional callback on a ~250ms
+    /// tick and at completion.
     pub async fn download(
         &self,
         url: &str,
@@ -121,18 +122,24 @@ impl Downloader {
 
         // Prefer bounded range chunks whenever the server supports them and the
         // size is known: some CDNs (notably YouTube's googlevideo) throttle a
-        // single full-file GET to ~playback speed but serve bounded ranges at
-        // full speed. `concurrency` then just controls how many chunks run at
-        // once (1 = sequential). Resuming an existing partial still uses a
-        // single ranged GET from the offset.
-        let use_chunked = info.accepts_ranges && info.total.is_some() && existing == 0;
-
-        let result = if use_chunked {
-            self.download_parallel(url, dest, &opts, info.total.unwrap_or(0), &downloaded)
-                .await
-        } else {
-            self.download_streaming(url, dest, &opts, existing, &downloaded)
-                .await
+        // single full-file or open-ended-range GET to ~playback speed after an
+        // initial burst, but serve bounded ranges at full speed. From scratch
+        // the chunks are downloaded with `concurrency` parallelism into a
+        // pre-sized `.part` sibling; a resume appends bounded chunks to the
+        // partial sequentially so the file stays a valid contiguous prefix.
+        let result = match info.total {
+            Some(total) if info.accepts_ranges && existing == 0 => {
+                self.download_parallel(url, dest, &opts, total, &downloaded)
+                    .await
+            }
+            Some(total) if info.accepts_ranges => {
+                self.download_tail_chunks(url, dest, &opts, existing, total, &downloaded)
+                    .await
+            }
+            _ => {
+                self.download_streaming(url, dest, &opts, existing, &downloaded)
+                    .await
+            }
         };
 
         // Stop the ticker and emit a final snapshot.
@@ -244,6 +251,84 @@ impl Downloader {
             downloaded.fetch_add(chunk.len() as u64, Ordering::SeqCst);
         }
         file.flush().await?;
+        Ok(())
+    }
+
+    /// Resume a partial download by appending the remaining tail as sequential
+    /// bounded range chunks.
+    ///
+    /// An open-ended `Range: bytes=N-` GET would be simpler, but googlevideo
+    /// throttles such requests to ~playback speed after an initial burst while
+    /// serving bounded `bytes=a-b` ranges at full speed. Appending in order
+    /// (rather than writing parallel chunks at offsets) keeps the file a valid
+    /// contiguous prefix at every moment, so an interrupted resume can itself
+    /// be resumed safely.
+    async fn download_tail_chunks(
+        &self,
+        url: &str,
+        dest: &Path,
+        opts: &DownloadOptions,
+        start: u64,
+        total: u64,
+        downloaded: &Arc<AtomicU64>,
+    ) -> crate::Result<()> {
+        let chunk_size = opts.chunk_size.max(1);
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dest)
+            .await?;
+        // Drop any stray bytes past the resume point and position for appends.
+        file.set_len(start).await?;
+        file.seek(std::io::SeekFrom::Start(start)).await?;
+
+        let mut pos = start;
+        while pos < total {
+            let end = (pos + chunk_size - 1).min(total - 1);
+            let resp = self
+                .with_retries(opts, || {
+                    self.http
+                        .get(url)
+                        .header(reqwest::header::RANGE, format!("bytes={pos}-{end}"))
+                        .send()
+                })
+                .await?;
+
+            if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+                // The server ignored the range despite advertising support in
+                // the probe: it sent the full body, so restart from scratch and
+                // reset the counter (mirrors the streaming 200 fallback).
+                downloaded.store(0, Ordering::SeqCst);
+                file.set_len(0).await?;
+                file.seek(std::io::SeekFrom::Start(0)).await?;
+                Self::write_stream(resp, &mut file, downloaded).await?;
+                file.flush().await?;
+                return Ok(());
+            }
+
+            Self::write_stream(resp, &mut file, downloaded).await?;
+            pos = end + 1;
+        }
+        file.flush().await?;
+        Ok(())
+    }
+
+    /// Stream a response body into `file`, bumping the progress counter.
+    async fn write_stream(
+        resp: reqwest::Response,
+        file: &mut tokio::fs::File,
+        downloaded: &Arc<AtomicU64>,
+    ) -> crate::Result<()> {
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| crate::Error::Network {
+                stage: "download",
+                source: e,
+            })?;
+            file.write_all(&chunk).await?;
+            downloaded.fetch_add(chunk.len() as u64, Ordering::SeqCst);
+        }
         Ok(())
     }
 
@@ -648,9 +733,101 @@ mod tests {
         .unwrap();
 
         assert_eq!(std::fs::read(&dest).unwrap(), body);
+        // The probe's 206 carries no Content-Range here, so the total is
+        // unknown and the resume must fall back to a single open-ended GET
+        // (bounded tail chunks need a known total).
         assert_eq!(
             received_range.lock().unwrap().as_deref(),
             Some("bytes=1000-")
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_uses_bounded_range_chunks() {
+        // Resuming must fetch the remaining tail as bounded `bytes=a-b` chunks,
+        // never a single open-ended `bytes=N-` GET: googlevideo throttles
+        // open-ended range requests to ~playback speed after an initial burst,
+        // while bounded ranges are served at full speed.
+        let server = MockServer::start().await;
+        let body: Vec<u8> = (0..2000u32).map(|i| (i % 251) as u8).collect();
+
+        let ranges: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+        struct Recorder {
+            body: Vec<u8>,
+            ranges: Arc<Mutex<Vec<String>>>,
+        }
+        impl Respond for Recorder {
+            fn respond(&self, req: &Request) -> ResponseTemplate {
+                let len = self.body.len() as u64;
+                if let Some(range) = req.headers.get("range").and_then(|v| v.to_str().ok()) {
+                    self.ranges.lock().unwrap().push(range.to_string());
+                    let spec = range.strip_prefix("bytes=").unwrap();
+                    let (start, end) = spec.split_once('-').unwrap();
+                    let start: u64 = start.parse().unwrap();
+                    let end: u64 = if end.is_empty() {
+                        len - 1
+                    } else {
+                        end.parse::<u64>().unwrap().min(len - 1)
+                    };
+                    let slice = self.body[start as usize..=end as usize].to_vec();
+                    return ResponseTemplate::new(206)
+                        .insert_header("accept-ranges", "bytes")
+                        .insert_header(
+                            "content-range",
+                            format!("bytes {start}-{end}/{len}").as_str(),
+                        )
+                        .set_body_bytes(slice);
+                }
+                ResponseTemplate::new(200)
+                    .insert_header("accept-ranges", "bytes")
+                    .set_body_bytes(self.body.clone())
+            }
+        }
+
+        Mock::given(path("/file"))
+            .respond_with(Recorder {
+                body: body.clone(),
+                ranges: ranges.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.bin");
+        std::fs::write(&dest, &body[..1000]).unwrap();
+
+        let dl = Downloader::new(reqwest::Client::new());
+        let opts = DownloadOptions {
+            chunk_size: 300,
+            ..DownloadOptions::default()
+        };
+        dl.download(&format!("{}/file", server.uri()), &dest, opts)
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        let seen = ranges.lock().unwrap();
+        // No open-ended range anywhere (the probe `bytes=0-0` is bounded too).
+        assert!(
+            seen.iter().all(|r| !r.ends_with('-')),
+            "resume must only send bounded ranges, saw {seen:?}"
+        );
+        // The tail [1000, 2000) is fetched in order as 300-byte chunks.
+        let tail: Vec<&str> = seen
+            .iter()
+            .map(String::as_str)
+            .filter(|r| *r != "bytes=0-0")
+            .collect();
+        assert_eq!(
+            tail,
+            vec![
+                "bytes=1000-1299",
+                "bytes=1300-1599",
+                "bytes=1600-1899",
+                "bytes=1900-1999",
+            ],
+            "tail must be sequential bounded chunks"
         );
     }
 

@@ -167,9 +167,13 @@ async fn download_builder_resume_true_sends_range() {
 
     assert_eq!(std::fs::read(&dest).expect("read"), body);
     let seen = ranges.lock().expect("lock");
+    // The tail is fetched as bounded chunks starting at the partial's length
+    // (an open-ended `bytes=1500-` would be throttled by googlevideo).
     assert!(
-        seen.iter().any(|r| r.as_deref() == Some("bytes=1500-")),
-        "resume(true) must send Range: bytes=1500-, saw {seen:?}"
+        seen.iter().any(|r| r
+            .as_deref()
+            .is_some_and(|r| r.starts_with("bytes=1500-") && !r.ends_with('-'))),
+        "resume(true) must send a bounded Range starting at 1500, saw {seen:?}"
     );
 }
 
