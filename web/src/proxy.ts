@@ -18,6 +18,16 @@ export interface WasmResponse {
 export type ProxyFetch = (req: WasmRequest) => Promise<WasmResponse>;
 
 /**
+ * Headers the browser forbids client JS from setting on a `fetch` (it silently
+ * drops them). We alias them so they survive to the proxy, which restores the
+ * real names server-side. Keep in sync with web/proxy/src/worker.ts.
+ */
+const FORBIDDEN_HEADER_ALIASES: Record<string, string> = {
+  origin: "x-ytdown-origin",
+  referer: "x-ytdown-referer",
+};
+
+/**
  * Build a fetch callback that routes every request through `proxyUrl`. The
  * target URL is passed as `?url=<encoded>`; the proxy forwards method, headers,
  * and body, and must respond with permissive CORS headers (see web/proxy).
@@ -29,7 +39,10 @@ export function makeProxyFetch(
   return async (req) => {
     const target = `${proxyUrl}?url=${encodeURIComponent(req.url)}`;
     const headers = new Headers();
-    for (const [k, v] of req.headers) headers.set(k, v);
+    for (const [k, v] of req.headers) {
+      const alias = FORBIDDEN_HEADER_ALIASES[k.toLowerCase()];
+      headers.set(alias ?? k, v);
+    }
     const res = await fetchImpl(target, {
       method: req.method,
       headers,

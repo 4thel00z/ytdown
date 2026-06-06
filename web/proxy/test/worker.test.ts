@@ -29,4 +29,29 @@ describe("proxy worker", () => {
     const res = await worker.fetch(new Request("https://w/p"));
     expect(res.status).toBe(400);
   });
+
+  it("restores aliased forbidden headers before forwarding upstream", async () => {
+    let sentHeaders: Headers | undefined;
+    const fetchMock = vi.fn(async (_url: any, init: any) => {
+      sentHeaders = new Headers(init.headers);
+      return new Response("ok", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const req = new Request("https://w/p?url=" + encodeURIComponent("https://yt/api"), {
+      method: "POST",
+      headers: {
+        "x-ytdown-origin": "https://www.youtube.com",
+        "x-ytdown-referer": "https://www.youtube.com/",
+        "x-goog-api-key": "k",
+      },
+      body: "{}",
+    });
+    await worker.fetch(req);
+
+    expect(sentHeaders!.get("origin")).toBe("https://www.youtube.com");
+    expect(sentHeaders!.get("referer")).toBe("https://www.youtube.com/");
+    expect(sentHeaders!.get("x-ytdown-origin")).toBeNull();
+    expect(sentHeaders!.get("x-goog-api-key")).toBe("k");
+  });
 });

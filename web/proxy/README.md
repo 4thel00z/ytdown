@@ -26,6 +26,17 @@ const ytdown = await Ytdown.create({
 - `OPTIONS {workerUrl}` — answers CORS preflight with `204 No Content` and full CORS headers.
 - Missing `?url` param — returns `400 Bad Request`.
 
+### Forbidden-header aliasing
+
+YouTube's InnerTube API requires `Origin: https://www.youtube.com` and `Referer: https://www.youtube.com/` headers, or it answers `400`/`403`. But `Origin` and `Referer` are on the WHATWG "forbidden header names" list — browsers **silently drop** them when page JS tries to set them on a `fetch`. So the SDK sends them under safe aliases the browser will pass through:
+
+| Real header | Alias the SDK sends |
+| ----------- | ------------------- |
+| `Origin`    | `x-ytdown-origin`   |
+| `Referer`   | `x-ytdown-referer`  |
+
+Before forwarding upstream, this worker restores each `x-ytdown-<name>` header to its real name and deletes the alias. A server-side Worker `fetch` is allowed to set `Origin`/`Referer` (the forbidden-header restriction is browser-only), so they reach YouTube intact. The mapping lives in `web/proxy/src/worker.ts` (`ALIAS_TO_REAL`) and must stay in sync with `web/src/proxy.ts` (`FORBIDDEN_HEADER_ALIASES`).
+
 ## WARNING: Open Passthrough — No Auth or Rate Limiting
 
 This worker is a **fully open proxy**. Anyone who discovers its URL can use it to proxy arbitrary HTTP requests through your Cloudflare account. Before exposing it publicly you are responsible for adding access control. Options include:
