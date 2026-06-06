@@ -1,7 +1,6 @@
 //! InnerTube API client: talks to YouTube's private `youtubei/v1` endpoints
 //! while impersonating one of several official client identities.
 
-use futures::StreamExt;
 use serde::Deserialize;
 
 use crate::error::{Error, Result, UnavailableReason};
@@ -13,35 +12,21 @@ use crate::error::{Error, Result, UnavailableReason};
 /// exhaust memory. `reqwest` imposes no default response-size limit.
 pub(crate) const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
 
-/// Buffer a response body up to [`MAX_RESPONSE_BYTES`], erroring if exceeded.
+/// Validate a buffered control-plane body against the size cap.
 ///
-/// Reads incrementally via `bytes_stream` so an oversized (or slow-drip) body is
-/// rejected once the cap is crossed rather than accumulated wholesale.
-pub(crate) async fn read_bounded(resp: reqwest::Response, stage: &'static str) -> Result<Vec<u8>> {
-    if let Some(len) = resp.content_length() {
-        if len > MAX_RESPONSE_BYTES {
-            return Err(Error::Extraction {
-                stage,
-                message: format!("response body too large: {len} bytes"),
-            });
-        }
-    }
-    let mut buf = Vec::new();
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|source| Error::Network {
+/// The transport already enforces the cap while streaming; this re-checks the
+/// buffered length so the invariant is local to this module too.
+pub(crate) fn read_bounded(
+    resp: crate::transport::HttpResponse,
+    stage: &'static str,
+) -> Result<Vec<u8>> {
+    if resp.body.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(Error::Extraction {
             stage,
-            message: source.to_string(),
-        })?;
-        if buf.len() as u64 + chunk.len() as u64 > MAX_RESPONSE_BYTES {
-            return Err(Error::Extraction {
-                stage,
-                message: "response body exceeded size limit".into(),
-            });
-        }
-        buf.extend_from_slice(&chunk);
+            message: "response body exceeded size limit".into(),
+        });
     }
-    Ok(buf)
+    Ok(resp.body)
 }
 
 /// Buffer a response body (bounded) and deserialize it as JSON.
@@ -50,11 +35,11 @@ pub(crate) async fn read_bounded(resp: reqwest::Response, stage: &'static str) -
 /// rather than the expected payload, surface that message instead of an opaque
 /// "missing field" deserialization error. InnerTube answers a stale or
 /// malformed request with such an envelope (e.g. HTTP 400 `FAILED_PRECONDITION`).
-async fn read_bounded_json<T: serde::de::DeserializeOwned>(
-    resp: reqwest::Response,
+fn read_bounded_json<T: serde::de::DeserializeOwned>(
+    resp: crate::transport::HttpResponse,
     stage: &'static str,
 ) -> Result<T> {
-    let bytes = read_bounded(resp, stage).await?;
+    let bytes = read_bounded(resp, stage)?;
     serde_json::from_slice(&bytes).map_err(|e| {
         if let Some(message) = error_envelope_message(&bytes) {
             Error::Extraction {
@@ -194,13 +179,16 @@ pub(crate) struct BrowseRequest {
 
 /// Low-level InnerTube client. The base URL is injectable for testing.
 pub(crate) struct InnerTube {
-    http: reqwest::Client,
+    http: std::sync::Arc<dyn crate::transport::HttpClient>,
     base: String,
 }
 
 impl InnerTube {
     /// Build a client targeting an arbitrary base URL (for mock servers).
-    pub fn with_base_url(http: reqwest::Client, base: String) -> Self {
+    pub fn with_base_url(
+        http: std::sync::Arc<dyn crate::transport::HttpClient>,
+        base: String,
+    ) -> Self {
         Self {
             http,
             base: base.trim_end_matches('/').to_string(),
@@ -241,11 +229,10 @@ impl InnerTube {
     pub async fn visitor_data(&self) -> Option<String> {
         let body = serde_json::json!({ "context": Self::context(ClientKind::Web, None) });
         let resp = self.post("visitor_id", ClientKind::Web, body).await.ok()?;
-        if !resp.status().is_success() {
+        if !resp.is_success() {
             return None;
         }
-        let value: serde_json::Value =
-            read_bounded_json(resp, "innertube/visitor_id").await.ok()?;
+        let value: serde_json::Value = read_bounded_json(resp, "innertube/visitor_id").ok()?;
         value
             .get("responseContext")?
             .get("visitorData")?
@@ -265,28 +252,30 @@ impl InnerTube {
         path: &str,
         client: ClientKind,
         body: serde_json::Value,
-    ) -> Result<reqwest::Response> {
+    ) -> Result<crate::transport::HttpResponse> {
+        use crate::transport::HttpRequest;
         let params = client.params();
         let url = format!(
             "{}/youtubei/v1/{}?key={}",
             self.base, path, INNERTUBE_API_KEY
         );
+        let payload = serde_json::to_vec(&body).map_err(|e| Error::Extraction {
+            stage: "innertube",
+            message: format!("failed to serialize request body: {e}"),
+        })?;
         self.http
-            .post(url)
-            .header("User-Agent", params.user_agent)
-            .header("Content-Type", "application/json")
-            .header("X-Goog-Api-Key", INNERTUBE_API_KEY)
-            .header("X-YouTube-Client-Name", params.client_name_id.to_string())
-            .header("X-YouTube-Client-Version", params.client_version)
-            .header("Origin", "https://www.youtube.com")
-            .header("Referer", "https://www.youtube.com/")
-            .json(&body)
-            .send()
+            .execute(
+                HttpRequest::post("innertube", url)
+                    .header("User-Agent", params.user_agent)
+                    .header("Content-Type", "application/json")
+                    .header("X-Goog-Api-Key", INNERTUBE_API_KEY)
+                    .header("X-YouTube-Client-Name", params.client_name_id.to_string())
+                    .header("X-YouTube-Client-Version", params.client_version)
+                    .header("Origin", "https://www.youtube.com")
+                    .header("Referer", "https://www.youtube.com/")
+                    .body(payload),
+            )
             .await
-            .map_err(|source| Error::Network {
-                stage: "innertube",
-                message: source.to_string(),
-            })
     }
 
     /// Fetch the `player` response for a video.
@@ -319,7 +308,7 @@ impl InnerTube {
             );
         }
         let resp = self.post("player", client, body).await?;
-        let parsed: PlayerResponse = read_bounded_json(resp, "innertube/player").await?;
+        let parsed: PlayerResponse = read_bounded_json(resp, "innertube/player")?;
         parsed.playability_status.ensure_ok()?;
         Ok(parsed)
     }
@@ -340,7 +329,7 @@ impl InnerTube {
             }
         }
         let resp = self.post("browse", client, body).await?;
-        read_bounded_json(resp, "innertube/browse").await
+        read_bounded_json(resp, "innertube/browse")
     }
 
     /// Resolve a canonical URL (e.g. `https://www.youtube.com/@handle`) into its
@@ -355,7 +344,7 @@ impl InnerTube {
             "url": url,
         });
         let resp = self.post("navigation/resolve_url", client, body).await?;
-        read_bounded_json(resp, "innertube/resolve_url").await
+        read_bounded_json(resp, "innertube/resolve_url")
     }
 
     /// Fetch a `search` response as a raw JSON value (video-only filter).
@@ -382,7 +371,7 @@ impl InnerTube {
             }),
         };
         let resp = self.post("search", client, body).await?;
-        read_bounded_json(resp, "innertube/search").await
+        read_bounded_json(resp, "innertube/search")
     }
 }
 
@@ -602,7 +591,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
         let resp = it
             .player("dQw4w9WgXcQ", ClientKind::Android, None, None)
             .await
@@ -655,7 +647,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
         // Mismatched headers/sts would 404 the mock -> error; success proves them.
         it.player("dQw4w9WgXcQ", ClientKind::Android, Some(19834), None)
             .await
@@ -696,7 +691,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
         // A mismatched UA/extras would not match the mock and 404 -> error.
         it.player("dQw4w9WgXcQ", ClientKind::Ios, None, None)
             .await
@@ -737,7 +735,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
         it.search("rust", None).await.unwrap();
         it.search("rust", Some("TOK")).await.unwrap();
     }
@@ -754,7 +755,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
         let resp = it
             .player("dQw4w9WgXcQ", ClientKind::Android, None, None)
             .await
@@ -785,7 +789,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
         let value = it
             .browse(BrowseRequest {
                 browse_id: Some("VLPLx".into()),
@@ -822,7 +829,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
         let value = it.search("rust", None).await.unwrap();
         assert!(value["contents"]["twoColumnSearchResultsRenderer"].is_object());
     }
@@ -841,7 +851,10 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(body))
             .mount(&server)
             .await;
-        let it = InnerTube::with_base_url(reqwest::Client::new(), server.uri());
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
         it.player("x", ClientKind::Web, None, None)
             .await
             .unwrap_err()

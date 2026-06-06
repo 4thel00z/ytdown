@@ -295,7 +295,7 @@ mod tests {
             .await;
 
         let it = Arc::new(InnerTube::with_base_url(
-            reqwest::Client::new(),
+            Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
             server.uri(),
         ));
         let first = fixture("browse_playlist_page1.json");
@@ -347,7 +347,7 @@ mod tests {
             .await;
 
         let it = Arc::new(InnerTube::with_base_url(
-            reqwest::Client::new(),
+            Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
             server.uri(),
         ));
         // First page yields one entry and the looping token.
@@ -398,7 +398,7 @@ mod tests {
             .await;
 
         let it = Arc::new(InnerTube::with_base_url(
-            reqwest::Client::new(),
+            Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
             server.uri(),
         ));
         // First page: one entry + a fresh continuation token.
@@ -473,7 +473,7 @@ mod tests {
             .await;
 
         let it = Arc::new(InnerTube::with_base_url(
-            reqwest::Client::new(),
+            Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
             server.uri(),
         ));
         // First page is fetched up front, like the real extractor does.
@@ -507,7 +507,7 @@ mod tests {
             .await;
 
         let it = Arc::new(InnerTube::with_base_url(
-            reqwest::Client::new(),
+            Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
             server.uri(),
         ));
         let first = serde_json::json!({

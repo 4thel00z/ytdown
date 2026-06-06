@@ -175,7 +175,11 @@ impl YoutubeExtractor {
 
     /// Construct an InnerTube client bound to this extractor's base URL.
     fn innertube(&self, ctx: &ExtractorContext) -> InnerTube {
-        InnerTube::with_base_url(ctx.http.clone(), self.base_url.clone())
+        // temporary: ctx.http becomes Arc<dyn HttpClient> in a later task
+        InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(ctx.http.clone())),
+            self.base_url.clone(),
+        )
     }
 
     /// Resolve a single video into [`MediaInfo::Single`].

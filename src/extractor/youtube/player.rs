@@ -443,7 +443,7 @@ pub(crate) async fn fetch_player_js(
             stage: "fetch_iframe_api",
             message: source.to_string(),
         })?;
-    let iframe_bytes = super::innertube::read_bounded(iframe_resp, "fetch_iframe_api").await?;
+    let iframe_bytes = read_bounded_reqwest(iframe_resp, "fetch_iframe_api").await?;
     let iframe = String::from_utf8_lossy(&iframe_bytes).into_owned();
 
     static VER_RE: OnceLock<Option<Regex>> = OnceLock::new();
@@ -475,10 +475,48 @@ pub(crate) async fn fetch_player_js(
             stage: "fetch_player_js",
             message: source.to_string(),
         })?;
-    let js_bytes = super::innertube::read_bounded(js_resp, "fetch_player_js").await?;
+    let js_bytes = read_bounded_reqwest(js_resp, "fetch_player_js").await?;
     let js = String::from_utf8_lossy(&js_bytes).into_owned();
 
     Ok((version, js))
+}
+
+/// Buffer a `reqwest::Response` body up to [`super::innertube::MAX_RESPONSE_BYTES`].
+///
+/// Temporary: `fetch_player_js` still streams from `reqwest` directly; it is
+/// rewired through the [`crate::transport::HttpClient`] trait in a later task,
+/// at which point this helper is removed in favour of `innertube::read_bounded`
+/// over a buffered `HttpResponse`.
+async fn read_bounded_reqwest(
+    resp: reqwest::Response,
+    stage: &'static str,
+) -> crate::Result<Vec<u8>> {
+    use futures::StreamExt;
+    let max = super::innertube::MAX_RESPONSE_BYTES;
+    if let Some(len) = resp.content_length() {
+        if len > max {
+            return Err(Error::Extraction {
+                stage,
+                message: format!("response body too large: {len} bytes"),
+            });
+        }
+    }
+    let mut buf = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|source| Error::Network {
+            stage,
+            message: source.to_string(),
+        })?;
+        if buf.len() as u64 + chunk.len() as u64 > max {
+            return Err(Error::Extraction {
+                stage,
+                message: "response body exceeded size limit".into(),
+            });
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
 }
 
 /// Apply a solved player to a [`RawFormat`]'s `signatureCipher` or direct URL,
