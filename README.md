@@ -138,6 +138,20 @@ ones — before forwarding to YouTube.
 - The reference proxy is an open passthrough — read the security warning in
   [`web/proxy/README.md`](web/proxy/README.md) before exposing it publicly.
 
+### Try it locally
+
+Build the wasm, then run the demo server (behind the `serve` feature):
+
+    cd web && bun run build:wasm
+    cargo run -p ytdown-cli --features serve -- serve --open
+
+`ytdown serve` hosts a single-file demo page and a local CORS proxy on
+`http://127.0.0.1:8080`, so resolving and downloading work with no extra setup.
+The page offers preset downloads (best progressive / audio / video), a
+download-mechanism toggle (File System Access streaming or Blob), and a bulk
+mode for multiple URLs. A standalone copy of the page (wasm inlined) is produced
+by `cd web/demo && bun build.mjs` (writes `web/demo/index.html`).
+
 ## Features
 
 | Feature  | Default | Description                                                          |
