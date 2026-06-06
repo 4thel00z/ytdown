@@ -8,7 +8,7 @@ repository = "https://github.com/4thel00z/ytdown"
 keywords = ["youtube", "download", "media", "yt-dlp"]
 categories = ["multimedia", "api-bindings"]
 # The Python bindings (ytdown-py) are a separate, unpublished maturin crate.
-exclude = ["ytdown-py"]
+exclude = ["ytdown-py", "ytdown-wasm"]
 
 [features]
 default = []

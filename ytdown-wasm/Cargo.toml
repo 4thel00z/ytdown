@@ -1,0 +1,32 @@
+[package]
+name = "ytdown-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WebAssembly bindings for ytdown: resolve YouTube media in the browser."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/4thel00z/ytdown"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ytdown = { path = ".." }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+async-trait = "0.1"
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+# `ytdown-wasm` is a wasm32-only crate (js-sys, browser getrandom, a `?Send`
+# transport impl) that cannot compile for the host target, so it must stay out
+# of the parent workspace's `--workspace` builds. The parent excludes this path;
+# this empty table makes the crate its own standalone workspace so wasm-pack's
+# `cargo metadata` resolves cleanly.
+[workspace]
