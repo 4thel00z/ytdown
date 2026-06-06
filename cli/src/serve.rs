@@ -72,7 +72,7 @@ async fn proxy(
         reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET);
     let mut rb = st.http.request(rmethod, target).headers(fwd);
     if !body.is_empty() {
-        rb = rb.body(body.to_vec());
+        rb = rb.body(body);
     }
     match rb.send().await {
         Ok(up) => {
@@ -80,6 +80,11 @@ async fn proxy(
                 StatusCode::from_u16(up.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let mut builder = Response::builder().status(status);
             for (k, v) in up.headers().iter() {
+                if k.as_str()
+                    .eq_ignore_ascii_case("access-control-allow-origin")
+                {
+                    continue;
+                }
                 if let (Ok(name), Ok(val)) = (
                     HeaderName::from_bytes(k.as_ref()),
                     HeaderValue::from_bytes(v.as_bytes()),
