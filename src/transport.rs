@@ -71,7 +71,8 @@ impl HttpRequest {
 pub struct HttpResponse {
     /// HTTP status code.
     pub status: u16,
-    /// Response headers as `(lowercased-name, value)` pairs.
+    /// Response headers as `(name, value)` pairs. The built-in transports
+    /// lowercase the names, but `header()` matches case-insensitively regardless.
     pub headers: Vec<(String, String)>,
     /// Fully-buffered response body.
     pub body: Vec<u8>,
@@ -93,6 +94,13 @@ impl HttpResponse {
 }
 
 /// A runtime-agnostic HTTP client used by the extraction core.
+///
+/// The `Send + Sync` supertrait bound is kept on all targets so the rest of the
+/// async extraction stack (which is `Send` on native) does not need to relax its
+/// bounds. On `wasm32` the returned `execute` future is `?Send` (a JS `fetch`
+/// future is not `Send`), while the implementor itself is made `Send + Sync` via
+/// an `unsafe impl` that is sound under wasm's single-threaded model — see the
+/// `ytdown-wasm` crate's transport.
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 pub trait HttpClient: Send + Sync {
@@ -128,5 +136,14 @@ mod tests {
         assert!(resp.is_success());
         assert_eq!(resp.header("content-length"), Some("0"));
         assert_eq!(resp.header("missing"), None);
+    }
+
+    #[test]
+    fn get_builder_sets_method_and_url() {
+        let r = HttpRequest::get("player", "https://x.test/base.js");
+        assert_eq!(r.method, Method::Get);
+        assert_eq!(r.url, "https://x.test/base.js");
+        assert!(r.headers.is_empty());
+        assert!(r.body.is_none());
     }
 }
