@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0](https://github.com/4thel00z/ytdown/compare/ytdown-cli-v0.2.0...ytdown-cli-v0.3.0) (2026-06-06)
+
+
+### Features
+
+* **cli:** colorful animated download progress bars ([a09fa1c](https://github.com/4thel00z/ytdown/commit/a09fa1cb470c64646f774c9d5a9c02ac4c621669))
+* **cli:** feature-gated 'serve' subcommand serving the embedded demo ([a831fbe](https://github.com/4thel00z/ytdown/commit/a831fbe782b3a99de4ba697da7db59b3bee13d7a))
+* **cli:** serve /proxy streams upstream and restores Origin/Referer aliases ([e55d5b8](https://github.com/4thel00z/ytdown/commit/e55d5b87bc7580db803a4210eda3b9041d201865))
+
+
+### Bug Fixes
+
+* **cli:** serve build.rs degrades gracefully without wasm (unbreaks --all-features CI) ([8d61974](https://github.com/4thel00z/ytdown/commit/8d61974bedeaed3a9d417a8a24263ec5961e7bce))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * ytdown bumped from 0.4.0 to 0.5.0
+
 ## [0.2.0](https://github.com/4thel00z/ytdown/compare/ytdown-cli-v0.1.0...ytdown-cli-v0.2.0) (2026-06-05)
 
 

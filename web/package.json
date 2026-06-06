@@ -1,6 +1,6 @@
 {
   "name": "@4thel00z/ytdown",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Resolve and download YouTube media from the browser (WASM core).",
   "license": "MIT OR Apache-2.0",
   "type": "module",
@@ -14,16 +14,31 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist", "wasm"],
+  "files": [
+    "dist",
+    "wasm"
+  ],
   "scripts": {
     "build:wasm": "wasm-pack build ../ytdown-wasm --target web --out-dir ../web/wasm",
     "build": "bun run build:wasm && tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
-  "repository": { "type": "git", "url": "https://github.com/4thel00z/ytdown.git" },
-  "keywords": ["youtube", "download", "wasm", "browser", "yt-dlp"],
-  "publishConfig": { "access": "public", "provenance": true },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/4thel00z/ytdown.git"
+  },
+  "keywords": [
+    "youtube",
+    "download",
+    "wasm",
+    "browser",
+    "yt-dlp"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "devDependencies": {
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",

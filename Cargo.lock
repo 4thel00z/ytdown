@@ -3602,7 +3602,7 @@ dependencies = [
 
 [[package]]
 name = "ytdown"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "boa_engine",
@@ -3623,7 +3623,7 @@ dependencies = [
 
 [[package]]
 name = "ytdown-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
