@@ -60,9 +60,14 @@ impl HttpClient for JsHttpClient {
             .await
             .map_err(|e| transport_err(req.stage, &e))?;
 
+        // A missing/non-numeric status becomes 0, which is not 2xx — so
+        // `is_success()` returns false and downstream guards fail safe.
         let status = num(&resp, "status").unwrap_or(0.0) as u16;
         let body = match Reflect::get(&resp, &JsValue::from_str("body")) {
-            Ok(v) if !v.is_undefined() && !v.is_null() => Uint8Array::new(&v).to_vec(),
+            Ok(v) if !v.is_undefined() && !v.is_null() => v
+                .dyn_into::<Uint8Array>()
+                .map(|u| u.to_vec())
+                .unwrap_or_default(),
             _ => Vec::new(),
         };
         let headers = read_headers(&resp);
@@ -96,12 +101,17 @@ fn read_headers(resp: &JsValue) -> Vec<(String, String)> {
     out
 }
 fn transport_err(stage: &'static str, e: &JsValue) -> Error {
-    Error::Network {
-        stage,
-        message: e
-            .as_string()
-            .unwrap_or_else(|| "JS fetch callback rejected".into()),
-    }
+    // JS rejections are usually Error objects, not strings: try `.message`,
+    // then a plain string, then a debug rendering — never lose all context.
+    let message = e
+        .as_string()
+        .or_else(|| {
+            js_sys::Reflect::get(e, &JsValue::from_str("message"))
+                .ok()
+                .and_then(|m| m.as_string())
+        })
+        .unwrap_or_else(|| format!("{e:?}"));
+    Error::Network { stage, message }
 }
 
 /// Browser-facing handle. Construct in JS with `new Ytdown(fetchCallback)`.
