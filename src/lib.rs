@@ -32,22 +32,29 @@
 pub(crate) mod jsi;
 
 /// Downloading resolved formats to disk.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod download;
 pub mod error;
 pub mod extractor;
 /// Format selection over a video's available representations.
 pub mod format;
 /// Postprocessing of downloaded media via ffmpeg.
-#[cfg(feature = "ffmpeg")]
+#[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
 pub mod postprocess;
 /// Runtime-agnostic HTTP transport.
 pub mod transport;
 pub mod types;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::future::IntoFuture;
-use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::pin::Pin;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use download::{DownloadOptions, Progress};
 pub use error::{Error, Result};
 pub use extractor::{Extractor, ExtractorContext, Registry};
@@ -57,6 +64,7 @@ pub use transport::ReqwestClient;
 pub use transport::{HttpClient, HttpRequest, HttpResponse, Method};
 pub use types::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 use download::{Downloader, ProgressCallback};
 use extractor::youtube::YoutubeExtractor;
 
@@ -68,8 +76,9 @@ use extractor::youtube::YoutubeExtractor;
 pub struct Ytdown {
     ctx: ExtractorContext,
     registry: Registry,
+    #[cfg(not(target_arch = "wasm32"))]
     downloader: Downloader,
-    #[cfg(feature = "ffmpeg")]
+    #[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
     ffmpeg_binary: PathBuf,
 }
 
@@ -79,9 +88,10 @@ pub struct Ytdown {
 /// to add more.
 pub struct YtdownBuilder {
     user_agent: Option<String>,
+    #[cfg(not(target_arch = "wasm32"))]
     client: Option<reqwest::Client>,
     extractors: Vec<Box<dyn Extractor>>,
-    #[cfg(feature = "ffmpeg")]
+    #[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
     ffmpeg_binary: PathBuf,
 }
 
@@ -89,9 +99,10 @@ impl Default for YtdownBuilder {
     fn default() -> Self {
         Self {
             user_agent: None,
+            #[cfg(not(target_arch = "wasm32"))]
             client: None,
             extractors: vec![Box::new(YoutubeExtractor::new())],
-            #[cfg(feature = "ffmpeg")]
+            #[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
             ffmpeg_binary: PathBuf::from("ffmpeg"),
         }
     }
@@ -107,13 +118,14 @@ impl YtdownBuilder {
     }
 
     /// Supply a pre-configured [`reqwest::Client`], overriding the default.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn client(mut self, c: reqwest::Client) -> Self {
         self.client = Some(c);
         self
     }
 
     /// Path to the `ffmpeg` binary used by [`Ytdown::download_merged`].
-    #[cfg(feature = "ffmpeg")]
+    #[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
     pub fn ffmpeg_binary(mut self, p: impl Into<PathBuf>) -> Self {
         self.ffmpeg_binary = p.into();
         self
@@ -139,6 +151,7 @@ impl YtdownBuilder {
     /// Finish building.
     ///
     /// Returns an [`Error::Network`] if the default HTTP client cannot be built.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build(self) -> Result<Ytdown> {
         let http = match self.client {
             Some(c) => c,
@@ -185,6 +198,7 @@ impl Ytdown {
     /// The returned [`DownloadBuilder`] is a future: configure it with
     /// [`progress`](DownloadBuilder::progress), [`concurrency`](DownloadBuilder::concurrency),
     /// and [`resume`](DownloadBuilder::resume), then `.await` it.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn download<'a>(&'a self, format: &Format, dest: impl AsRef<Path>) -> DownloadBuilder<'a> {
         DownloadBuilder {
             downloader: &self.downloader,
@@ -198,7 +212,7 @@ impl Ytdown {
     /// `dest`, then mux them into `dest` with `ffmpeg`.
     ///
     /// The temporary files are removed once muxing succeeds.
-    #[cfg(feature = "ffmpeg")]
+    #[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
     pub async fn download_merged(
         &self,
         video: &Format,
@@ -226,7 +240,7 @@ impl Ytdown {
 }
 
 /// Compute a temporary sibling path next to `dest` with the given suffix.
-#[cfg(feature = "ffmpeg")]
+#[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
 fn sibling_tmp(dest: &Path, suffix: &str) -> PathBuf {
     let stem = dest
         .file_name()
@@ -250,6 +264,7 @@ fn sibling_tmp(dest: &Path, suffix: &str) -> PathBuf {
 /// # Ok(())
 /// # }
 /// ```
+#[cfg(not(target_arch = "wasm32"))]
 pub struct DownloadBuilder<'a> {
     downloader: &'a Downloader,
     url: String,
@@ -257,6 +272,7 @@ pub struct DownloadBuilder<'a> {
     options: DownloadOptions,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> DownloadBuilder<'a> {
     /// Observe progress as the download runs.
     pub fn progress(mut self, f: impl Fn(Progress) + Send + Sync + 'static) -> Self {
@@ -294,6 +310,7 @@ impl<'a> DownloadBuilder<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> IntoFuture for DownloadBuilder<'a> {
     type Output = Result<()>;
     type IntoFuture = Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>>;
@@ -313,6 +330,7 @@ mod tests {
 
     /// Finding 5: `chunk_size()` and `retries()` must actually reach the
     /// underlying `DownloadOptions` (previously unreachable via the builder).
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn builder_setters_reach_download_options() {
         let yt = Ytdown::builder().build().expect("build");

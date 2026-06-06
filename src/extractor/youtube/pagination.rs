@@ -1,11 +1,11 @@
 //! Lazy continuation-based pagination for YouTube collections.
 
-use futures::stream::{self, BoxStream};
+use futures::stream;
 use serde_json::Value;
 use std::sync::Arc;
 
 use super::innertube::{BrowseRequest, InnerTube};
-use crate::types::{Entry, Thumbnail};
+use crate::types::{Entry, EntryStream, Thumbnail};
 
 /// Which kind of collection a page belongs to. Renderer paths differ by kind.
 ///
@@ -63,11 +63,7 @@ struct PageState {
 /// Drives [`stream::unfold`] over an `Option<continuation_token>`: each step
 /// drains buffered entries, and only when the buffer empties does it fetch the
 /// next page. The stream ends once no continuation token remains.
-pub(crate) fn entry_stream(
-    it: Arc<InnerTube>,
-    first_page: Value,
-    kind: PageKind,
-) -> BoxStream<'static, crate::Result<Entry>> {
+pub(crate) fn entry_stream(it: Arc<InnerTube>, first_page: Value, kind: PageKind) -> EntryStream {
     let state = PageState {
         it,
         kind,

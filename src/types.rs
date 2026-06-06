@@ -2,6 +2,24 @@
 
 use serde::Serialize;
 
+/// A lazily-paginated stream of collection [`Entry`]s.
+///
+/// On native targets this is a `Send` [`BoxStream`](futures::stream::BoxStream);
+/// on `wasm32` it is a non-`Send`
+/// [`LocalBoxStream`](futures::stream::LocalBoxStream), mirroring the
+/// `?Send` HTTP transport (a JS `fetch`-backed future is not `Send`).
+#[cfg(not(target_arch = "wasm32"))]
+pub type EntryStream = futures::stream::BoxStream<'static, crate::error::Result<Entry>>;
+
+/// A lazily-paginated stream of collection [`Entry`]s.
+///
+/// On native targets this is a `Send` [`BoxStream`](futures::stream::BoxStream);
+/// on `wasm32` it is a non-`Send`
+/// [`LocalBoxStream`](futures::stream::LocalBoxStream), mirroring the
+/// `?Send` HTTP transport (a JS `fetch`-backed future is not `Send`).
+#[cfg(target_arch = "wasm32")]
+pub type EntryStream = futures::stream::LocalBoxStream<'static, crate::error::Result<Entry>>;
+
 /// Resolved media: a single item or a lazily-paginated collection.
 #[derive(Debug)]
 // `Single` carries the full `VideoInfo` by value as part of the public contract;
@@ -189,7 +207,7 @@ pub struct CollectionInfo {
     /// The kind of collection.
     pub kind: CollectionKind,
     /// Lazily-paginated entries.
-    pub entries: futures::stream::BoxStream<'static, crate::error::Result<Entry>>,
+    pub entries: EntryStream,
 }
 
 impl std::fmt::Debug for CollectionInfo {

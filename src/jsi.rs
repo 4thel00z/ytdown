@@ -1,5 +1,6 @@
 //! JavaScript interpreter (boa_engine) for solving extractor ciphers.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
 use boa_engine::{Context, Source};
@@ -19,6 +20,7 @@ const LOOP_ITERATION_LIMIT: u64 = 5_000_000;
 /// giant allocation or other non-looping CPU/memory blowup. The blocking eval is
 /// run on a dedicated thread under this timeout so a single malicious video
 /// cannot wedge an executor worker forever; the runaway thread is abandoned.
+#[cfg(not(target_arch = "wasm32"))]
 const EVAL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Build a boa [`Context`] with execution limits applied.
@@ -95,6 +97,7 @@ impl JsFunction {
     /// hostile `while(1){}` that somehow slips the loop limit, or a giant
     /// allocation), the future returns an [`Error::Cipher`] rather than wedging a
     /// worker thread. The runaway blocking thread is abandoned.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn call_str_async(&self, input: &str) -> Result<String> {
         let this = self.clone();
         let input = input.to_string();
@@ -108,6 +111,18 @@ impl JsFunction {
                 "cipher evaluation exceeded time limit".into(),
             )),
         }
+    }
+
+    /// Asynchronously evaluate this function against `input` (wasm32).
+    ///
+    /// On `wasm32-unknown-unknown` there is no blocking-thread pool and no
+    /// `tokio::time` wheel, so the CPU-bound boa evaluation runs inline. The
+    /// loop-iteration limit in [`limited_context`] still bounds a hostile
+    /// `while(1){}`; the wall-clock [`EVAL_TIMEOUT`] is not enforced here, so a
+    /// non-looping CPU/memory blowup is not separately bounded on wasm.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn call_str_async(&self, input: &str) -> Result<String> {
+        self.call_str(input)
     }
 }
 

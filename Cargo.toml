@@ -15,8 +15,6 @@ default = []
 ffmpeg = []
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process", "sync", "time"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "stream", "cookies"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -26,6 +24,14 @@ url = "2"
 boa_engine = "0.20"
 regex = "1"
 tracing = "0.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "stream", "cookies"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", features = ["sync", "macros"] }
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 wiremock = "0.6"

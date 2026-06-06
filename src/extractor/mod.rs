@@ -29,7 +29,14 @@ impl ExtractorContext {
 }
 
 /// A site-specific extractor: tests URLs and resolves them into media.
-#[async_trait::async_trait]
+///
+/// On native targets the `extract` future is `Send` (the whole async extraction
+/// stack is `Send`). On `wasm32` it is `?Send`, mirroring the [`HttpClient`]
+/// transport: a JS `fetch`-backed future is not `Send`.
+///
+/// [`HttpClient`]: crate::transport::HttpClient
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 pub trait Extractor: Send + Sync {
     /// Stable identifier, e.g. `"youtube"`.
     fn name(&self) -> &'static str;

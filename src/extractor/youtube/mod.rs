@@ -571,7 +571,8 @@ fn find_channel_browse_id(value: &serde_json::Value) -> Option<String> {
     walk(value)
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl Extractor for YoutubeExtractor {
     fn name(&self) -> &'static str {
         "youtube"
