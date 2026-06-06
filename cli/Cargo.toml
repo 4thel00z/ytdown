@@ -25,8 +25,19 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = { version = "0.7", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
+base64 = { version = "0.22", optional = true }
+webbrowser = { version = "1", optional = true }
+
+[features]
+serve = ["dep:axum", "dep:reqwest", "dep:base64", "dep:webbrowser", "tokio/net"]
+
+[build-dependencies]
+base64 = "0.22"
 
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
 wiremock = "0.6"
+tower = { version = "0.5", features = ["util"] }

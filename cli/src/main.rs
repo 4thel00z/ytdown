@@ -25,6 +25,9 @@ mod picker;
 
 mod tui;
 
+#[cfg(feature = "serve")]
+mod serve;
+
 #[derive(Parser)]
 #[command(
     name = "ytdown",
@@ -87,6 +90,16 @@ enum Command {
     },
     /// Download a video, playlist, channel, or search result set.
     Get(get::GetArgs),
+    /// Serve the browser (WASM) demo with a local CORS proxy.
+    #[cfg(feature = "serve")]
+    Serve {
+        /// Port to bind on 127.0.0.1.
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+        /// Open the demo in the default browser.
+        #[arg(long)]
+        open: bool,
+    },
 }
 
 #[tokio::main]
@@ -129,5 +142,7 @@ async fn run(cli: Cli, mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
             let yt = app::build_ytdown(ua.as_deref())?;
             get::run(&yt, mp, &args).await
         }
+        #[cfg(feature = "serve")]
+        Command::Serve { port, open } => serve::run(port, open).await,
     }
 }
