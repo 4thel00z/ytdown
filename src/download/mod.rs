@@ -245,7 +245,7 @@ impl Downloader {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| crate::Error::Network {
                 stage: "download",
-                source: e,
+                message: e.to_string(),
             })?;
             file.write_all(&chunk).await?;
             downloaded.fetch_add(chunk.len() as u64, Ordering::SeqCst);
@@ -324,7 +324,7 @@ impl Downloader {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| crate::Error::Network {
                 stage: "download",
-                source: e,
+                message: e.to_string(),
             })?;
             file.write_all(&chunk).await?;
             downloaded.fetch_add(chunk.len() as u64, Ordering::SeqCst);
@@ -441,7 +441,7 @@ impl Downloader {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| crate::Error::Network {
                 stage: "download",
-                source: e,
+                message: e.to_string(),
             })?;
             file.write_all(&chunk).await?;
             downloaded.fetch_add(chunk.len() as u64, Ordering::SeqCst);
@@ -471,7 +471,7 @@ impl Downloader {
                     if attempt >= opts.retries {
                         return Err(crate::Error::Network {
                             stage: "download",
-                            source: e,
+                            message: e.to_string(),
                         });
                     }
                     let backoff = backoff_delay(attempt);

@@ -7,14 +7,13 @@ pub enum Error {
     /// No registered extractor matches the URL.
     #[error("no extractor supports this URL: {0}")]
     UnsupportedUrl(String),
-    /// Underlying HTTP failure.
-    #[error("network error during {stage}: {source}")]
+    /// Underlying HTTP/transport failure.
+    #[error("network error during {stage}: {message}")]
     Network {
         /// The operation that was in progress when the failure occurred.
         stage: &'static str,
-        /// The underlying reqwest error.
-        #[source]
-        source: reqwest::Error,
+        /// A human-readable description of the transport failure.
+        message: String,
     },
     /// The site responded but the expected data could not be extracted.
     #[error("extraction failed at {stage}: {message}")]

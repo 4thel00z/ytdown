@@ -147,7 +147,7 @@ impl YtdownBuilder {
                 }
                 builder.build().map_err(|source| Error::Network {
                     stage: "client-build",
-                    source,
+                    message: source.to_string(),
                 })?
             }
         };

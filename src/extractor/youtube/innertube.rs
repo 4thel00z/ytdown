@@ -29,7 +29,10 @@ pub(crate) async fn read_bounded(resp: reqwest::Response, stage: &'static str) -
     let mut buf = Vec::new();
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|source| Error::Network { stage, source })?;
+        let chunk = chunk.map_err(|source| Error::Network {
+            stage,
+            message: source.to_string(),
+        })?;
         if buf.len() as u64 + chunk.len() as u64 > MAX_RESPONSE_BYTES {
             return Err(Error::Extraction {
                 stage,
@@ -282,7 +285,7 @@ impl InnerTube {
             .await
             .map_err(|source| Error::Network {
                 stage: "innertube",
-                source,
+                message: source.to_string(),
             })
     }
 

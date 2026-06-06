@@ -436,12 +436,12 @@ pub(crate) async fn fetch_player_js(
         .await
         .map_err(|source| Error::Network {
             stage: "fetch_iframe_api",
-            source,
+            message: source.to_string(),
         })?
         .error_for_status()
         .map_err(|source| Error::Network {
             stage: "fetch_iframe_api",
-            source,
+            message: source.to_string(),
         })?;
     let iframe_bytes = super::innertube::read_bounded(iframe_resp, "fetch_iframe_api").await?;
     let iframe = String::from_utf8_lossy(&iframe_bytes).into_owned();
@@ -468,12 +468,12 @@ pub(crate) async fn fetch_player_js(
         .await
         .map_err(|source| Error::Network {
             stage: "fetch_player_js",
-            source,
+            message: source.to_string(),
         })?
         .error_for_status()
         .map_err(|source| Error::Network {
             stage: "fetch_player_js",
-            source,
+            message: source.to_string(),
         })?;
     let js_bytes = super::innertube::read_bounded(js_resp, "fetch_player_js").await?;
     let js = String::from_utf8_lossy(&js_bytes).into_owned();
