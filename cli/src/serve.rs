@@ -18,7 +18,7 @@ pub(crate) fn app() -> Router {
 }
 
 /// Run the demo server on `127.0.0.1:port`.
-pub async fn run(port: u16, open: bool) -> anyhow::Result<()> {
+pub(crate) async fn run(port: u16, open: bool) -> anyhow::Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -55,5 +55,6 @@ mod tests {
         let s = String::from_utf8_lossy(&body);
         assert!(s.contains("Best progressive"), "demo UI present");
         assert!(!s.contains("__WASM_B64__"), "wasm placeholder filled");
+        assert!(!s.contains("__GLUE_B64__"), "glue placeholder filled");
     }
 }
