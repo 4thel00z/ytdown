@@ -33,7 +33,7 @@
   </section>
 
   <section id="single" class="space-y-3 rounded-xl bg-slate-900 p-4 ring-1 ring-slate-800">
-    <input id="url" placeholder="https://youtu.be/dQw4w9WgXcQ"
+    <input id="url" type="url" placeholder="https://youtu.be/dQw4w9WgXcQ"
            class="w-full rounded-md bg-slate-800 px-3 py-2 text-sm" />
     <div class="flex flex-wrap gap-2">
       <button data-preset="progressive" class="preset rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Best progressive</button>
@@ -103,9 +103,11 @@ async function downloadToDisk(url, { filename, proxyUrl, mech, onProgress }) {
     }
     const handle = await picker({ suggestedName: filename });
     const writable = await handle.createWritable();
-    const reader = res.body.getReader();
-    for (;;) { const { done, value } = await reader.read(); if (done) break; await writable.write(value); report(value.byteLength); }
-    await writable.close();
+    try {
+      const reader = res.body.getReader();
+      for (;;) { const { done, value } = await reader.read(); if (done) break; await writable.write(value); report(value.byteLength); }
+      await writable.close();
+    } catch (e) { await writable.abort(); throw e; }
     return;
   }
   const reader = res.body.getReader();
@@ -114,7 +116,7 @@ async function downloadToDisk(url, { filename, proxyUrl, mech, onProgress }) {
   const href = URL.createObjectURL(new Blob(parts));
   const a = document.createElement("a");
   a.href = href; a.download = filename; a.click(); a.remove();
-  URL.revokeObjectURL(href);
+  setTimeout(() => URL.revokeObjectURL(href), 10000);
 }
 
 function isProgressive(f) { return !!(f.video && f.audio); }
@@ -126,9 +128,15 @@ function cmp(a, b) { for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) ret
 function maxBy(arr, keyFn) { let best = null, bk = null; for (const x of arr) { const k = keyFn(x); if (best === null || cmp(k, bk) > 0) { best = x; bk = k; } } return best; }
 function pickFormat(formats, preset) {
   if (preset === "progressive") return maxBy(formats.filter(isProgressive), videoRank);
-  if (preset === "video") return maxBy(formats.filter(isVideoOnly), videoRank) ?? maxBy(formats.filter(isProgressive), videoRank);
-  if (preset === "audio") return maxBy(formats.filter(isAudioOnly), audioRank) ?? maxBy(formats.filter(isProgressive), audioRank);
+  if (preset === "video") return maxBy(formats.filter((f) => isVideoOnly(f) || isProgressive(f)), videoRank);
+  if (preset === "audio") return maxBy(formats.filter((f) => isAudioOnly(f) || isProgressive(f)), audioRank);
   return null;
+}
+function containerExt(c) {
+  if (!c) return "bin";
+  if (typeof c === "string") return c.toLowerCase();
+  if (typeof c === "object" && c.Other) return String(c.Other).toLowerCase();
+  return "bin";
 }
 
 const $ = (id) => document.getElementById(id);
@@ -148,7 +156,7 @@ async function resolveAndDownload(url, preset) {
   const info = await yt.resolve(url);
   const fmt = pickFormat(info.formats ?? [], preset);
   if (!fmt) throw new Error(`no '${preset}' format available`);
-  const ext = (fmt.container ?? "bin").toString().toLowerCase();
+  const ext = containerExt(fmt.container);
   const name = `${(info.title ?? info.id ?? "video").replace(/[^\w.-]+/g, "_")}.${ext}`;
   log(`downloading itag ${fmt.itag} → ${name}`);
   await downloadToDisk(fmt.url, { filename: name, proxyUrl: $("proxy").value, mech: $("mech").value, onProgress: setBar });
