@@ -83,6 +83,61 @@ A watch URL that also carries `&list=` resolves to the **video** (the `v=`
 parameter wins). Anything else fails fast with `Error::UnsupportedUrl` —
 no network request is made.
 
+## Browser (WASM) + TypeScript SDK
+
+[`@4thel00z/ytdown`](web) is an npm package that runs ytdown's extraction core —
+URL resolution plus signature deciphering — compiled to WebAssembly, so a video
+can be resolved and its media bytes downloaded entirely client-side in the
+browser.
+
+### The CORS reality
+
+YouTube's InnerTube API and media CDN do not send CORS headers, so a browser
+cannot call them directly. The SDK therefore routes **every** request through a
+CORS proxy you deploy. A reference Cloudflare Worker lives in [`web/proxy`](web/proxy).
+Without a proxy the SDK will not work against YouTube.
+
+### Install + deploy
+
+```bash
+npm install @4thel00z/ytdown
+# deploy the reference proxy (or bring your own):
+cd web/proxy && npx wrangler deploy
+```
+
+### Usage
+
+```ts
+import { Ytdown } from "@4thel00z/ytdown";
+
+const yt = await Ytdown.create({ proxy: "https://ytdown-proxy.<you>.workers.dev" });
+const info = await yt.resolve("https://youtu.be/dQw4w9WgXcQ");
+// info is the resolved video metadata + formats; pick a format URL, then:
+await yt.download(formatUrl, {
+  filename: "video.mp4",
+  onProgress: (p) => console.log(p.percent),
+});
+```
+
+### How it works
+
+The WASM core resolves and deciphers the stream URLs; the SDK then fetches the
+bytes through your proxy and writes them to disk via the File System Access API
+(streaming, so large files never fully buffer), falling back to an in-memory
+Blob on browsers without it (Firefox/Safari). The proxy restores the
+browser-forbidden `Origin`/`Referer` headers — which the SDK sends aliased as
+`x-ytdown-origin`/`x-ytdown-referer` because browsers silently drop the real
+ones — before forwarding to YouTube.
+
+### Limitations
+
+- Playlists, channels, and search (collections) are not yet supported in the
+  browser build — `resolve` returns an error for them. Single videos work.
+- The Blob fallback buffers the whole file in memory (fine for short clips and
+  audio; large videos need the File System Access API, currently Chromium-only).
+- The reference proxy is an open passthrough — read the security warning in
+  [`web/proxy/README.md`](web/proxy/README.md) before exposing it publicly.
+
 ## Features
 
 | Feature  | Default | Description                                                          |
