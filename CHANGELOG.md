@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.5.0](https://github.com/4thel00z/ytdown/compare/ytdown-v0.4.0...ytdown-v0.5.0) (2026-06-06)
+
+
+### Features
+
+* **cli:** colorful animated download progress bars ([a09fa1c](https://github.com/4thel00z/ytdown/commit/a09fa1cb470c64646f774c9d5a9c02ac4c621669))
+* **cli:** feature-gated 'serve' subcommand serving the embedded demo ([a831fbe](https://github.com/4thel00z/ytdown/commit/a831fbe782b3a99de4ba697da7db59b3bee13d7a))
+* **cli:** serve /proxy streams upstream and restores Origin/Referer aliases ([e55d5b8](https://github.com/4thel00z/ytdown/commit/e55d5b87bc7580db803a4210eda3b9041d201865))
+* **demo:** self-contained single-file HTML generator with preset + bulk UI ([8a814a4](https://github.com/4thel00z/ytdown/commit/8a814a487834c2aecd047f5d3d9bc7b7d258600d))
+* **lib:** wasm-only build_with_transport for browser builds ([b774c19](https://github.com/4thel00z/ytdown/commit/b774c19c3019e94856238e1c4894f11173f63dc5))
+* **proxy:** reference Cloudflare Worker passthrough with CORS ([15c12b1](https://github.com/4thel00z/ytdown/commit/15c12b15c65ec186e766965fd72932056593cb60))
+* **transport:** add runtime-agnostic HttpClient trait and types ([11b773a](https://github.com/4thel00z/ytdown/commit/11b773a4c96ea863be733284b7244601130d9135))
+* **transport:** native ReqwestClient with bounded streaming read ([edee7cf](https://github.com/4thel00z/ytdown/commit/edee7cf1d790298200cfe51aeac4ede6714b16ee))
+* **wasm:** ytdown-wasm crate with JS-callback transport and resolve() ([9a87c2c](https://github.com/4thel00z/ytdown/commit/9a87c2c7a3c975ce73517d23fb7af32c44cff41b))
+* **web:** downloadToDisk with FS Access streaming + Blob fallback ([5064dab](https://github.com/4thel00z/ytdown/commit/5064dab063f6216fa47f9d43b28a8179f712aca4))
+* **web:** proxy fetch callback for the WASM transport ([dc32d7b](https://github.com/4thel00z/ytdown/commit/dc32d7bcc6994865b84e7606ffbf78b14a109941))
+* **web:** Ytdown wrapper wiring proxy fetch into the wasm core ([c7748c4](https://github.com/4thel00z/ytdown/commit/c7748c4111daac8cbaa999d40a770921d317ede4))
+
+
+### Bug Fixes
+
+* **cli:** serve build.rs degrades gracefully without wasm (unbreaks --all-features CI) ([8d61974](https://github.com/4thel00z/ytdown/commit/8d61974bedeaed3a9d417a8a24263ec5961e7bce))
+* **demo:** best-audio preset matches Rust (AudioOnly only, no progressive fallback) ([36b09e4](https://github.com/4thel00z/ytdown/commit/36b09e47e9a177b197576d9db963d2e7163e0807))
+* **demo:** container ext, preset parity with FormatSelector, blob revoke + FS abort ([88fbfbf](https://github.com/4thel00z/ytdown/commit/88fbfbf1ac4eed2299851e3475b53d8cbd147129))
+* **demo:** fsapi mechanism throws instead of silently falling back to Blob ([eed4fdb](https://github.com/4thel00z/ytdown/commit/eed4fdb8278c7e66e9986406b384a5a42a49c3dc))
+* **download:** resume partials via bounded range chunks ([83c2064](https://github.com/4thel00z/ytdown/commit/83c2064d4ab2d9ed872e606271a4670f06c99619))
+* **wasm:** defensive body decode + richer JS error context in transport ([79c9655](https://github.com/4thel00z/ytdown/commit/79c965557411341384d1834a6270ce74a992eb74))
+* **web:** alias browser-forbidden Origin/Referer headers across SDK and proxy ([b6f846b](https://github.com/4thel00z/ytdown/commit/b6f846b4bcb360aa84661d6ca42ce9b723a9f924))
+
 ## [0.4.0](https://github.com/4thel00z/ytdown/compare/ytdown-v0.3.0...ytdown-v0.4.0) (2026-06-05)
 
 
