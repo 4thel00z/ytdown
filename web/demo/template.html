@@ -129,7 +129,7 @@ function maxBy(arr, keyFn) { let best = null, bk = null; for (const x of arr) { 
 function pickFormat(formats, preset) {
   if (preset === "progressive") return maxBy(formats.filter(isProgressive), videoRank);
   if (preset === "video") return maxBy(formats.filter((f) => isVideoOnly(f) || isProgressive(f)), videoRank);
-  if (preset === "audio") return maxBy(formats.filter((f) => isAudioOnly(f) || isProgressive(f)), audioRank);
+  if (preset === "audio") return maxBy(formats.filter(isAudioOnly), audioRank);
   return null;
 }
 function containerExt(c) {
