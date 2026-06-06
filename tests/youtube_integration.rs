@@ -51,7 +51,9 @@ async fn extracts_video_with_cipher_solving() {
     mount_player_js(&server).await;
 
     let extractor = YoutubeExtractor::with_base_url(server.uri());
-    let ctx = ExtractorContext::new(reqwest::Client::new());
+    let ctx = ExtractorContext::new(std::sync::Arc::new(ytdown::ReqwestClient::new(
+        reqwest::Client::new(),
+    )));
     let url = url::Url::parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ").unwrap();
 
     let info = extractor.extract(&ctx, &url).await.unwrap();
@@ -122,7 +124,9 @@ async fn channel_handle_resolves_via_resolve_url_then_browses() {
         .await;
 
     let extractor = YoutubeExtractor::with_base_url(server.uri());
-    let ctx = ExtractorContext::new(reqwest::Client::new());
+    let ctx = ExtractorContext::new(std::sync::Arc::new(ytdown::ReqwestClient::new(
+        reqwest::Client::new(),
+    )));
     let url = url::Url::parse("https://www.youtube.com/@SomeHandle").unwrap();
 
     let info = extractor.extract(&ctx, &url).await.unwrap();
@@ -163,7 +167,9 @@ async fn extracts_playlist_as_collection() {
         .await;
 
     let extractor = YoutubeExtractor::with_base_url(server.uri());
-    let ctx = ExtractorContext::new(reqwest::Client::new());
+    let ctx = ExtractorContext::new(std::sync::Arc::new(ytdown::ReqwestClient::new(
+        reqwest::Client::new(),
+    )));
     let url = url::Url::parse("https://www.youtube.com/playlist?list=PLx").unwrap();
 
     let info = extractor.extract(&ctx, &url).await.unwrap();

@@ -12,15 +12,15 @@ use crate::{Error, MediaInfo, Result};
 /// Shared state handed to extractors.
 pub struct ExtractorContext {
     /// Shared HTTP client.
-    pub http: reqwest::Client,
+    pub http: std::sync::Arc<dyn crate::transport::HttpClient>,
     /// Cipher-solver cache, keyed by player version, so that a solved player is
     /// reused across every video sharing that version.
     pub(crate) player_cache: tokio::sync::Mutex<HashMap<String, Arc<SolvedPlayer>>>,
 }
 
 impl ExtractorContext {
-    /// Build a context around an existing HTTP client.
-    pub fn new(http: reqwest::Client) -> Self {
+    /// Build a context around an existing transport.
+    pub fn new(http: std::sync::Arc<dyn crate::transport::HttpClient>) -> Self {
         Self {
             http,
             player_cache: tokio::sync::Mutex::new(HashMap::new()),
@@ -110,7 +110,9 @@ mod tests {
     #[tokio::test]
     async fn registry_dispatches_by_match() {
         let reg = Registry::new(vec![Box::new(Dummy)]);
-        let ctx = ExtractorContext::new(reqwest::Client::new());
+        let ctx = ExtractorContext::new(std::sync::Arc::new(crate::transport::ReqwestClient::new(
+            reqwest::Client::new(),
+        )));
         assert!(reg.resolve(&ctx, "https://dummy.test/v/1").await.is_ok());
         let err = reg.resolve(&ctx, "https://other.test/").await.unwrap_err();
         assert!(matches!(err, Error::UnsupportedUrl(_)));

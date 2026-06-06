@@ -175,11 +175,7 @@ impl YoutubeExtractor {
 
     /// Construct an InnerTube client bound to this extractor's base URL.
     fn innertube(&self, ctx: &ExtractorContext) -> InnerTube {
-        // temporary: ctx.http becomes Arc<dyn HttpClient> in a later task
-        InnerTube::with_base_url(
-            std::sync::Arc::new(crate::transport::ReqwestClient::new(ctx.http.clone())),
-            self.base_url.clone(),
-        )
+        InnerTube::with_base_url(ctx.http.clone(), self.base_url.clone())
     }
 
     /// Resolve a single video into [`MediaInfo::Single`].
@@ -352,9 +348,7 @@ impl YoutubeExtractor {
     /// Fetch + solve the player JS for the current player version, caching the
     /// result so it is reused across formats and across videos sharing a version.
     async fn solved_player(&self, ctx: &ExtractorContext) -> Result<Arc<SolvedPlayer>> {
-        // temporary: ctx.http becomes Arc<dyn HttpClient> in Task 6
-        let transport = crate::transport::ReqwestClient::new(ctx.http.clone());
-        let (version, js) = fetch_player_js(&transport, &self.base_url).await?;
+        let (version, js) = fetch_player_js(ctx.http.as_ref(), &self.base_url).await?;
         {
             let cache = ctx.player_cache.lock().await;
             if let Some(found) = cache.get(&version) {

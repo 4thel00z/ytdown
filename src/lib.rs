@@ -154,8 +154,11 @@ impl YtdownBuilder {
             }
         };
 
+        let transport: std::sync::Arc<dyn transport::HttpClient> =
+            std::sync::Arc::new(transport::ReqwestClient::new(http.clone()));
+
         Ok(Ytdown {
-            ctx: ExtractorContext::new(http.clone()),
+            ctx: ExtractorContext::new(transport),
             registry: Registry::new(self.extractors),
             downloader: Downloader::new(http),
             #[cfg(feature = "ffmpeg")]
