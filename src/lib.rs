@@ -40,6 +40,8 @@ pub mod format;
 /// Postprocessing of downloaded media via ffmpeg.
 #[cfg(feature = "ffmpeg")]
 pub mod postprocess;
+/// Runtime-agnostic HTTP transport.
+pub mod transport;
 pub mod types;
 
 use std::future::IntoFuture;
@@ -50,6 +52,7 @@ pub use download::{DownloadOptions, Progress};
 pub use error::{Error, Result};
 pub use extractor::{Extractor, ExtractorContext, Registry};
 pub use format::FormatSelector;
+pub use transport::{HttpClient, HttpRequest, HttpResponse, Method};
 pub use types::*;
 
 use download::{Downloader, ProgressCallback};
