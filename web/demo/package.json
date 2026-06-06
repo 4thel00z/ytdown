@@ -1,0 +1,1 @@
+{ "name": "ytdown-demo", "private": true, "type": "module", "scripts": { "build": "bun build.mjs" } }

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ytdown — browser demo</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+<main class="max-w-3xl mx-auto p-6 space-y-6">
+  <header class="space-y-1">
+    <h1 class="text-2xl font-bold">ytdown <span class="text-emerald-400">browser</span></h1>
+    <p class="text-sm text-slate-400">Resolve &amp; download YouTube media client-side via WebAssembly. Requires a CORS proxy.</p>
+  </header>
+
+  <section class="space-y-3 rounded-xl bg-slate-900 p-4 ring-1 ring-slate-800">
+    <label class="block text-xs uppercase tracking-wide text-slate-400">Proxy URL</label>
+    <input id="proxy" class="w-full rounded-md bg-slate-800 px-3 py-2 text-sm" />
+    <div class="flex flex-wrap gap-4 text-sm">
+      <label class="flex items-center gap-2">
+        <span class="text-slate-400">Download via</span>
+        <select id="mech" class="rounded-md bg-slate-800 px-2 py-1">
+          <option value="auto">Auto</option>
+          <option value="fsapi">File System Access (stream)</option>
+          <option value="blob">Blob</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-2">
+        <input id="bulk" type="checkbox" class="accent-emerald-500" />
+        <span class="text-slate-400">Bulk mode</span>
+      </label>
+    </div>
+  </section>
+
+  <section id="single" class="space-y-3 rounded-xl bg-slate-900 p-4 ring-1 ring-slate-800">
+    <input id="url" placeholder="https://youtu.be/dQw4w9WgXcQ"
+           class="w-full rounded-md bg-slate-800 px-3 py-2 text-sm" />
+    <div class="flex flex-wrap gap-2">
+      <button data-preset="progressive" class="preset rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Best progressive</button>
+      <button data-preset="audio" class="preset rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Best audio</button>
+      <button data-preset="video" class="preset rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Best video</button>
+    </div>
+  </section>
+
+  <section id="bulkbox" class="hidden space-y-3 rounded-xl bg-slate-900 p-4 ring-1 ring-slate-800">
+    <textarea id="urls" rows="5" placeholder="One URL per line"
+              class="w-full rounded-md bg-slate-800 px-3 py-2 text-sm font-mono"></textarea>
+    <div class="flex flex-wrap items-center gap-2">
+      <select id="bulkPreset" class="rounded-md bg-slate-800 px-2 py-1 text-sm">
+        <option value="progressive">Best progressive</option>
+        <option value="audio">Best audio</option>
+        <option value="video">Best video</option>
+      </select>
+      <button id="bulkGo" class="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Download all</button>
+    </div>
+    <ul id="bulkList" class="space-y-1 text-sm"></ul>
+  </section>
+
+  <section class="space-y-2">
+    <div class="h-2 w-full overflow-hidden rounded bg-slate-800">
+      <div id="bar" class="h-full w-0 bg-emerald-500 transition-all"></div>
+    </div>
+    <pre id="log" class="max-h-48 overflow-auto rounded-md bg-black/40 p-3 text-xs text-slate-300"></pre>
+  </section>
+</main>
+
+<script type="module">
+import init, { Ytdown as WasmYtdown } from "data:text/javascript;base64,__GLUE_B64__";
+
+const wasmB64 = "__WASM_B64__";
+const wasmBytes = Uint8Array.from(atob(wasmB64), (c) => c.charCodeAt(0));
+await init({ module_or_path: wasmBytes });
+
+const FORBIDDEN = { origin: "x-ytdown-origin", referer: "x-ytdown-referer" };
+function makeProxyFetch(proxyUrl) {
+  return async (req) => {
+    const headers = new Headers();
+    for (const [k, v] of req.headers) headers.set(FORBIDDEN[k.toLowerCase()] ?? k, v);
+    const res = await fetch(`${proxyUrl}?url=${encodeURIComponent(req.url)}`, {
+      method: req.method,
+      headers,
+      body: req.body && req.method !== "GET" ? req.body : undefined,
+    });
+    const body = new Uint8Array(await res.arrayBuffer());
+    const respHeaders = [];
+    res.headers.forEach((v, k) => respHeaders.push([k, v]));
+    return { status: res.status, headers: respHeaders, body };
+  };
+}
+
+async function downloadToDisk(url, { filename, proxyUrl, mech, onProgress }) {
+  const target = `${proxyUrl}?url=${encodeURIComponent(url)}`;
+  const res = await fetch(target);
+  if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`);
+  const total = Number(res.headers.get("content-length")) || undefined;
+  let received = 0;
+  const report = (n) => { received += n; onProgress?.(total ? (received / total) * 100 : undefined); };
+  const picker = globalThis.showSaveFilePicker;
+  const useFs = mech === "fsapi" || (mech === "auto" && typeof picker === "function");
+  if (useFs && typeof picker === "function") {
+    const handle = await picker({ suggestedName: filename });
+    const writable = await handle.createWritable();
+    const reader = res.body.getReader();
+    for (;;) { const { done, value } = await reader.read(); if (done) break; await writable.write(value); report(value.byteLength); }
+    await writable.close();
+    return;
+  }
+  const reader = res.body.getReader();
+  const parts = [];
+  for (;;) { const { done, value } = await reader.read(); if (done) break; parts.push(value); report(value.byteLength); }
+  const href = URL.createObjectURL(new Blob(parts));
+  const a = document.createElement("a");
+  a.href = href; a.download = filename; a.click(); a.remove();
+  URL.revokeObjectURL(href);
+}
+
+function isProgressive(f) { return !!(f.video && f.audio); }
+function isVideoOnly(f) { return !!(f.video && !f.audio); }
+function isAudioOnly(f) { return !!(f.audio && !f.video); }
+function videoRank(f) { return [f.video?.height ?? 0, f.video?.fps ?? 0, Number(f.bitrate ?? 0)]; }
+function audioRank(f) { return [Number(f.audio?.bitrate ?? f.bitrate ?? 0), f.audio?.sample_rate ?? 0]; }
+function cmp(a, b) { for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1; } return 0; }
+function maxBy(arr, keyFn) { let best = null, bk = null; for (const x of arr) { const k = keyFn(x); if (best === null || cmp(k, bk) > 0) { best = x; bk = k; } } return best; }
+function pickFormat(formats, preset) {
+  if (preset === "progressive") return maxBy(formats.filter(isProgressive), videoRank);
+  if (preset === "video") return maxBy(formats.filter(isVideoOnly), videoRank) ?? maxBy(formats.filter(isProgressive), videoRank);
+  if (preset === "audio") return maxBy(formats.filter(isAudioOnly), audioRank) ?? maxBy(formats.filter(isProgressive), audioRank);
+  return null;
+}
+
+const $ = (id) => document.getElementById(id);
+$("proxy").value = window.location.origin + "/proxy";
+const log = (m) => { $("log").textContent += m + "\n"; $("log").scrollTop = $("log").scrollHeight; };
+const setBar = (pct) => { $("bar").style.width = (pct == null ? 0 : Math.min(100, pct)) + "%"; };
+$("bulk").addEventListener("change", (e) => {
+  $("single").classList.toggle("hidden", e.target.checked);
+  $("bulkbox").classList.toggle("hidden", !e.target.checked);
+});
+
+function client() { return new WasmYtdown(makeProxyFetch($("proxy").value)); }
+
+async function resolveAndDownload(url, preset) {
+  const yt = client();
+  log(`resolving ${url} …`);
+  const info = await yt.resolve(url);
+  const fmt = pickFormat(info.formats ?? [], preset);
+  if (!fmt) throw new Error(`no '${preset}' format available`);
+  const ext = (fmt.container ?? "bin").toString().toLowerCase();
+  const name = `${(info.title ?? info.id ?? "video").replace(/[^\w.-]+/g, "_")}.${ext}`;
+  log(`downloading itag ${fmt.itag} → ${name}`);
+  await downloadToDisk(fmt.url, { filename: name, proxyUrl: $("proxy").value, mech: $("mech").value, onProgress: setBar });
+  log(`done: ${name}`);
+}
+
+document.querySelectorAll(".preset").forEach((btn) =>
+  btn.addEventListener("click", async () => {
+    setBar(0);
+    try { await resolveAndDownload($("url").value.trim(), btn.dataset.preset); }
+    catch (e) { log(`error: ${e.message ?? e}`); }
+  }),
+);
+
+$("bulkGo").addEventListener("click", async () => {
+  const urls = $("urls").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  const preset = $("bulkPreset").value;
+  $("bulkList").innerHTML = "";
+  const rows = urls.map((u) => { const li = document.createElement("li"); li.textContent = `· ${u} — queued`; $("bulkList").appendChild(li); return li; });
+  for (let i = 0; i < urls.length; i++) {
+    setBar(0);
+    rows[i].textContent = `· ${urls[i]} — resolving`;
+    try { await resolveAndDownload(urls[i], preset); rows[i].textContent = `✓ ${urls[i]} — done`; }
+    catch (e) { rows[i].textContent = `✗ ${urls[i]} — ${e.message ?? e}`; log(`error (${urls[i]}): ${e.message ?? e}`); }
+  }
+});
+</script>
+</body>
+</html>
