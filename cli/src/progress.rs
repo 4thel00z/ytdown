@@ -1,19 +1,32 @@
 //! indicatif progress bars fed by the library's `Progress` callback, plus a
 //! tracing writer that prints log lines above active bars.
 
+use std::time::Duration;
+
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use ytdown::Progress;
 
-/// Create a styled byte-progress bar attached to `mp`.
-pub fn bar(mp: &MultiProgress, label: &str) -> ProgressBar {
+/// Create a styled, colorful byte-progress bar attached to `mp`.
+///
+/// `color` is an indicatif color name (e.g. `"cyan"`, `"magenta"`) used for
+/// the filled portion of the bar and the spinner, so concurrent bars (video vs
+/// audio) read apart at a glance. The bar animates via a steady tick so the
+/// spinner keeps moving even while a request stalls.
+pub fn bar(mp: &MultiProgress, label: &str, color: &str) -> ProgressBar {
     let pb = mp.add(ProgressBar::new(0));
+    let template = format!(
+        "{{prefix:>7.bold.{color}}} {{spinner:.{color}}} {{bar:30.{color}/dim}} \
+         {{percent:>3.bold}}% {{bytes:.green}}/{{total_bytes:.green}} \
+         {{bytes_per_sec:.yellow}} eta {{eta:.cyan}}",
+    );
     pb.set_style(
-        ProgressStyle::with_template(
-            "{prefix:>6.bold} {bar:30} {percent:>3}% {bytes}/{total_bytes} {bytes_per_sec} eta {eta}",
-        )
-        .expect("static template"),
+        ProgressStyle::with_template(&template)
+            .expect("static template")
+            .progress_chars("█▉▊▋▌▍▎▏ ")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✓"),
     );
     pb.set_prefix(label.to_string());
+    pb.enable_steady_tick(Duration::from_millis(100));
     pb
 }
 
@@ -81,7 +94,7 @@ mod tests {
     #[test]
     fn callback_drives_bar_position_and_length() {
         let mp = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
-        let pb = bar(&mp, "test");
+        let pb = bar(&mp, "test", "cyan");
         let cb = callback(pb.clone());
         cb(Progress {
             bytes_downloaded: 50,

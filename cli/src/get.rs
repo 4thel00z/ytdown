@@ -163,7 +163,7 @@ async fn download_selection(
     }
     match selection {
         Selection::Single(f) => {
-            let pb = progress::bar(mp, "get");
+            let pb = progress::bar(mp, "get", "cyan");
             apply(yt.download(f, &dest), args)
                 .progress(progress::callback(pb.clone()))
                 .await?;
@@ -180,12 +180,12 @@ async fn download_selection(
             );
             let vtmp = part_path(&dest, "video.part");
             let atmp = part_path(&dest, "audio.part");
-            let vpb = progress::bar(mp, "video");
+            let vpb = progress::bar(mp, "video", "magenta");
             apply(yt.download(vf, &vtmp), args)
                 .progress(progress::callback(vpb.clone()))
                 .await?;
             vpb.finish();
-            let apb = progress::bar(mp, "audio");
+            let apb = progress::bar(mp, "audio", "blue");
             apply(yt.download(af, &atmp), args)
                 .progress(progress::callback(apb.clone()))
                 .await?;
