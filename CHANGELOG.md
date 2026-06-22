@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/4thel00z/ytdown/compare/ytdown-v0.6.0...ytdown-v0.6.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **youtube:** parse `lockupViewModel` playlist entries so old-format playlists (e.g. `PL601FC994BDD963E4`) resolve instead of returning zero entries ([a7f39db](https://github.com/4thel00z/ytdown/commit/a7f39db))
+
 ## [0.6.0](https://github.com/4thel00z/ytdown/compare/ytdown-v0.5.0...ytdown-v0.6.0) (2026-06-06)
 
 

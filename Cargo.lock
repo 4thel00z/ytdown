@@ -3602,7 +3602,7 @@ dependencies = [
 
 [[package]]
 name = "ytdown"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "boa_engine",
