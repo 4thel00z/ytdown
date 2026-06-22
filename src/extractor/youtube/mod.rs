@@ -369,9 +369,16 @@ impl YoutubeExtractor {
         } else {
             format!("VL{list_id}")
         };
+        // The `wgYCCAA=` selector (protobuf \xc2\x06\x02\x08\x00, "include all /
+        // show unavailable videos") is what yt-dlp always sends for playlists, so
+        // we mirror it for parity and to surface unavailable videos. It does NOT,
+        // however, change the renderer layout: live YouTube serves playlist videos
+        // as `lockupViewModel` objects regardless of this param, so the pagination
+        // parser handles `lockupViewModel` directly (see `collect`).
         let first = it
             .browse(BrowseRequest {
                 browse_id: Some(browse_id),
+                params: Some("wgYCCAA=".to_string()),
                 ..BrowseRequest::default()
             })
             .await?;

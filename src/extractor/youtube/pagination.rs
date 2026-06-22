@@ -178,6 +178,19 @@ fn collect(node: &Value, entries: &mut Vec<Entry>, token: &mut Option<String>) {
                             collect(child, entries, token);
                         }
                     }
+                    "lockupViewModel" => {
+                        // Modern playlist/channel responses serve each video as a
+                        // `lockupViewModel`. Only video lockups are entries; for
+                        // anything else (playlists, shelves) keep recursing in
+                        // case it nests recognizable renderers.
+                        if is_video_lockup(child) {
+                            if let Some(entry) = parse_lockup(child) {
+                                entries.push(entry);
+                            }
+                        } else {
+                            collect(child, entries, token);
+                        }
+                    }
                     "continuationCommand" => {
                         if token.is_none() {
                             if let Some(t) = child.get("token").and_then(Value::as_str) {
@@ -220,6 +233,95 @@ fn parse_renderer(r: &Value) -> Option<Entry> {
         duration,
         thumbnails,
     })
+}
+
+/// Whether a `lockupViewModel` describes a single video (vs. a playlist/shelf).
+fn is_video_lockup(lockup: &Value) -> bool {
+    lockup.get("contentType").and_then(Value::as_str) == Some("LOCKUP_CONTENT_TYPE_VIDEO")
+}
+
+/// Build an [`Entry`] from a video `lockupViewModel`.
+///
+/// The video id is read from `contentId`, falling back to the equivalent
+/// `watchEndpoint.videoId` if absent. Title and duration live under different
+/// paths than the legacy `*VideoRenderer` shape.
+fn parse_lockup(lockup: &Value) -> Option<Entry> {
+    let id = lockup
+        .get("contentId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            lockup
+                .pointer(
+                    "/rendererContext/commandContext/onTap/innertubeCommand/watchEndpoint/videoId",
+                )
+                .and_then(Value::as_str)
+        })?
+        .to_string();
+
+    let title = lockup
+        .pointer("/metadata/lockupMetadataViewModel/title/content")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    let duration = lockup_duration(lockup);
+
+    let thumbnails = lockup
+        .pointer("/contentImage/thumbnailViewModel/image/sources")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(parse_thumbnail).collect())
+        .unwrap_or_default();
+
+    Some(Entry {
+        url: format!("https://www.youtube.com/watch?v={id}"),
+        id,
+        title,
+        duration,
+        thumbnails,
+    })
+}
+
+/// Locate and parse the duration badge of a video `lockupViewModel`.
+///
+/// The duration is the `thumbnailBadgeViewModel.text` (e.g. `"9:59"`) of the
+/// overlay badge styled `THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT`; other overlays
+/// (hover actions, etc.) carry no duration, so walk every overlay badge and
+/// take the first whose text parses as a time.
+fn lockup_duration(lockup: &Value) -> Option<std::time::Duration> {
+    let overlays = lockup
+        .pointer("/contentImage/thumbnailViewModel/overlays")
+        .and_then(Value::as_array)?;
+    for overlay in overlays {
+        let badges = overlay
+            .pointer("/thumbnailBottomOverlayViewModel/badges")
+            .and_then(Value::as_array);
+        let Some(badges) = badges else { continue };
+        for badge in badges {
+            if let Some(text) = badge
+                .pointer("/thumbnailBadgeViewModel/text")
+                .and_then(Value::as_str)
+            {
+                if let Some(d) = parse_timestamp(text) {
+                    return Some(d);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse a `H:MM:SS` / `M:SS` / `S` timestamp into a [`Duration`].
+///
+/// Returns `None` for anything that is not a colon-separated run of numbers, so
+/// non-duration badge text (e.g. "LIVE", "4K") is rejected.
+fn parse_timestamp(text: &str) -> Option<std::time::Duration> {
+    let mut secs: u64 = 0;
+    let mut any = false;
+    for part in text.split(':') {
+        let n: u64 = part.trim().parse().ok()?;
+        secs = secs.checked_mul(60)?.checked_add(n)?;
+        any = true;
+    }
+    any.then(|| std::time::Duration::from_secs(secs))
 }
 
 /// Parse one thumbnail object.
@@ -481,6 +583,79 @@ mod tests {
             .await;
         let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, vec!["searchres01", "searchres02"]);
+    }
+
+    /// Bug fix: modern YouTube playlist responses serve videos as
+    /// `lockupViewModel` objects (not `playlistVideoRenderer`). The parser must
+    /// recognize this shape, extract the video id from `contentId`, the title,
+    /// and the duration, while skipping non-video lockups (playlists/shelves)
+    /// and picking up the sibling `continuationItemRenderer` token. Fixture is a
+    /// trimmed slice of a real `browse` response for PL601FC994BDD963E4.
+    #[tokio::test]
+    async fn playlist_stream_parses_real_lockup_view_model() {
+        let server = MockServer::start().await;
+
+        // Page 2 (continuation): a single lockupViewModel video, no further token.
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/browse"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "onResponseReceivedActions": [{ "appendContinuationItemsAction": {
+                    "continuationItems": [
+                        { "lockupViewModel": {
+                            "contentId": "PAGE2VIDEO0",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "metadata": { "lockupMetadataViewModel": {
+                                "title": { "content": "Page two video" } } },
+                            "contentImage": { "thumbnailViewModel": { "overlays": [
+                                { "thumbnailBottomOverlayViewModel": { "badges": [
+                                    { "thumbnailBadgeViewModel": {
+                                        "text": "1:30",
+                                        "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT"
+                                    } }
+                                ] } }
+                            ] } }
+                        } }
+                    ]
+                }}]
+            })))
+            .mount(&server)
+            .await;
+
+        let it = Arc::new(InnerTube::with_base_url(
+            Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        ));
+        let first = fixture("browse_playlist_lockup_real.json");
+
+        let entries: Vec<Entry> = entry_stream(it, first, PageKind::Playlist)
+            .map(|r| r.expect("entry"))
+            .collect()
+            .await;
+
+        let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        // The three real video lockups from page 1, then the continuation page's
+        // video. The non-video lockup ("LOCKUP_CONTENT_TYPE_PLAYLIST") is skipped.
+        assert_eq!(
+            ids,
+            vec!["HyUK5RAJg1c", "jb_H7SGOyyI", "JPew2mYGF1E", "PAGE2VIDEO0"]
+        );
+        assert_eq!(
+            entries[0].url,
+            "https://www.youtube.com/watch?v=HyUK5RAJg1c"
+        );
+        assert_eq!(
+            entries[0].title.as_deref(),
+            Some("Lecture 1 - Finite State Machines (Part 1/9)")
+        );
+        // Duration "9:59" parsed from the THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT badge.
+        assert_eq!(
+            entries[0].duration,
+            Some(std::time::Duration::from_secs(9 * 60 + 59))
+        );
+        assert_eq!(
+            entries[3].duration,
+            Some(std::time::Duration::from_secs(90))
+        );
     }
 
     /// Regression for finding 19: the channel `richItemRenderer` -> `videoRenderer`
