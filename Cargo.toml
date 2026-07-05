@@ -1,6 +1,6 @@
 [package]
 name = "ytdown"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2021"
 description = "A Rust library mirroring yt-dlp's core: extract, select, and download media. Ships with a companion CLI (ytdown-cli)."
 license = "MIT OR Apache-2.0"

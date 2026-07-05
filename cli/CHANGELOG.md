@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/4thel00z/ytdown/compare/ytdown-cli-v0.3.1...ytdown-cli-v0.4.0) (2026-07-05)
+
+
+### Features
+
+* authenticate requests with browser cookies (--cookies) ([0a27250](https://github.com/4thel00z/ytdown/commit/0a27250fa0922dd8470010ba0f2535b611a64ec7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * ytdown bumped from 0.6.0 to 0.7.0
+
 ## [0.3.1](https://github.com/4thel00z/ytdown/compare/ytdown-cli-v0.3.0...ytdown-cli-v0.3.1) (2026-06-06)
 
 

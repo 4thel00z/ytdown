@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/4thel00z/ytdown/compare/ytdown-v0.6.1...ytdown-v0.7.0) (2026-07-05)
+
+
+### Features
+
+* authenticate requests with browser cookies (--cookies) ([0a27250](https://github.com/4thel00z/ytdown/commit/0a27250fa0922dd8470010ba0f2535b611a64ec7))
+
+
+### Bug Fixes
+
+* **youtube:** report bot-check instead of age-restricted, revive TV client ([4aa5c7e](https://github.com/4thel00z/ytdown/commit/4aa5c7ecdbc03c61079d70523f183f3a7820c151))
+
 ## [0.6.1](https://github.com/4thel00z/ytdown/compare/ytdown-v0.6.0...ytdown-v0.6.1) (2026-06-23)
 
 
