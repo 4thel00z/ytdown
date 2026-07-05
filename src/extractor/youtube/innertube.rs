@@ -79,7 +79,9 @@ pub(crate) enum ClientKind {
     AndroidVr,
     /// iOS mobile app client.
     Ios,
-    /// Embedded TV/living-room client (useful for age-restricted content).
+    /// Living-room TV (Cobalt) client. The previous embedded TV identity
+    /// (`TVHTML5_SIMPLY_EMBEDDED_PLAYER`) was retired by YouTube and now only
+    /// answers "YouTube is no longer supported in this application or device".
     Tv,
 }
 
@@ -94,7 +96,7 @@ pub(crate) struct ClientParams {
     /// `context.client.clientName`.
     pub client_name: &'static str,
     /// Numeric client id sent as the `X-YouTube-Client-Name` header
-    /// (1=WEB, 3=ANDROID, 5=IOS, 85=TVHTML5_SIMPLY_EMBEDDED_PLAYER).
+    /// (1=WEB, 3=ANDROID, 5=IOS, 7=TVHTML5, 28=ANDROID_VR).
     pub client_name_id: u32,
     /// `context.client.clientVersion`.
     pub client_version: &'static str,
@@ -155,11 +157,10 @@ impl ClientKind {
                 }),
             },
             ClientKind::Tv => ClientParams {
-                client_name: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
-                client_name_id: 85,
-                client_version: "2.0",
-                user_agent: "Mozilla/5.0 (PlayStation; PlayStation 4/8.03) AppleWebKit/605.1.15 \
-                             (KHTML, like Gecko)",
+                client_name: "TVHTML5",
+                client_name_id: 7,
+                client_version: "7.20250312.16.00",
+                user_agent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
                 extras: serde_json::json!({}),
             },
         }
@@ -412,6 +413,16 @@ impl PlayabilityStatus {
             return Ok(());
         }
         let message = self.reason.clone().unwrap_or_default();
+        // The anti-bot wall ("Sign in to confirm you're not a bot") arrives as
+        // LOGIN_REQUIRED from most clients but UNPLAYABLE from some, so detect
+        // it by reason text before mapping by status: it means the requesting
+        // network is flagged, not that the video is age-restricted.
+        if message.to_lowercase().contains("not a bot") {
+            return Err(Error::Unavailable {
+                reason: UnavailableReason::BotCheck,
+                message,
+            });
+        }
         let reason = match self.status.as_str() {
             "LOGIN_REQUIRED" => UnavailableReason::AgeRestricted,
             "ERROR" => UnavailableReason::Gone,
@@ -702,6 +713,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tv_player_request_uses_live_tvhtml5_identity() {
+        // The old TVHTML5_SIMPLY_EMBEDDED_PLAYER (id 85) was retired by YouTube
+        // ("YouTube is no longer supported in this application or device"), so
+        // the TV fallback must impersonate the live Cobalt TVHTML5 client.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/youtubei/v1/player"))
+            .and(|req: &Request| {
+                let header = |name: &str| {
+                    req.headers
+                        .get(name)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string)
+                };
+                let ua_ok = header("user-agent").as_deref()
+                    == Some("Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version");
+                let cname_ok = header("x-youtube-client-name").as_deref() == Some("7");
+                let body: serde_json::Value = match serde_json::from_slice(&req.body) {
+                    Ok(v) => v,
+                    Err(_) => return false,
+                };
+                let client = &body["context"]["client"];
+                ua_ok && cname_ok && client["clientName"] == "TVHTML5"
+            })
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(fixture("player_android.json"), "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let it = InnerTube::with_base_url(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            server.uri(),
+        );
+        // A stale TV identity would not match the mock and 404 -> error.
+        it.player("dQw4w9WgXcQ", ClientKind::Tv, None, None)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn search_continuation_omits_query_and_params() {
         let server = MockServer::start().await;
         // First page: query + params, no continuation.
@@ -858,6 +911,34 @@ mod tests {
         it.player("x", ClientKind::Web, None, None)
             .await
             .unwrap_err()
+    }
+
+    #[tokio::test]
+    async fn bot_check_maps_to_bot_check_not_age_restricted() {
+        // YouTube's IP-level bot wall. Most clients answer LOGIN_REQUIRED…
+        assert!(matches!(
+            player_status_error(
+                "LOGIN_REQUIRED",
+                Some("Sign in to confirm you\u{2019}re not a bot")
+            )
+            .await,
+            Error::Unavailable {
+                reason: UnavailableReason::BotCheck,
+                ..
+            }
+        ));
+        // …but some (e.g. TVHTML5_SIMPLY) answer UNPLAYABLE with the same reason.
+        assert!(matches!(
+            player_status_error(
+                "UNPLAYABLE",
+                Some("Sign in to confirm you\u{2019}re not a bot")
+            )
+            .await,
+            Error::Unavailable {
+                reason: UnavailableReason::BotCheck,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

@@ -24,7 +24,7 @@ pub enum Error {
         message: String,
     },
     /// The media exists but cannot be accessed.
-    #[error("media unavailable: {reason}")]
+    #[error("media unavailable: {reason}{}", if .message.is_empty() { String::new() } else { format!(" \u{2014} {message}") })]
     Unavailable {
         /// The classified reason the media is unavailable.
         reason: UnavailableReason,
@@ -53,6 +53,10 @@ pub enum UnavailableReason {
     Gone,
     /// Age-restricted and no authenticated client succeeded.
     AgeRestricted,
+    /// The site's anti-bot wall ("Sign in to confirm you're not a bot"):
+    /// the requesting network is flagged, not the video itself. Retrying with
+    /// authenticated cookies usually resolves it.
+    BotCheck,
     /// Blocked in the request region.
     GeoBlocked,
     /// Live content (manifests not supported in v1).
@@ -66,6 +70,7 @@ impl std::fmt::Display for UnavailableReason {
         let s = match self {
             UnavailableReason::Gone => "gone",
             UnavailableReason::AgeRestricted => "age-restricted",
+            UnavailableReason::BotCheck => "bot-check",
             UnavailableReason::GeoBlocked => "geo-blocked",
             UnavailableReason::Live => "live",
             UnavailableReason::Other => "other",
