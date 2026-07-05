@@ -2,8 +2,9 @@
 //!
 //! YouTube's anti-bot wall ("Sign in to confirm you're not a bot") flags whole
 //! networks; the documented remedy is to retry with an authenticated browser
-//! session. [`CookieJar::parse_netscape`] loads a browser cookie export and
-//! [`CookieTransport`] wraps any [`HttpClient`], attaching a `Cookie` header —
+//! session. [`crate::cookies::CookieJar::parse_netscape`] loads a browser
+//! cookie export and [`crate::cookies::CookieTransport`] wraps any
+//! [`HttpClient`], attaching a `Cookie` header —
 //! and, when a `SAPISID` cookie is present, the `SAPISIDHASH` `Authorization`
 //! header InnerTube requires of logged-in callers — to requests whose host the
 //! cookies' domains match.
