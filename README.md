@@ -246,7 +246,25 @@ ytdown get 'https://www.youtube.com/playlist?list=…' --limit 10 -o '{index} - 
 | `serve` | Serve the browser (WASM) demo + a local CORS proxy (`--port`, `--open`); requires building with `--features serve` |
 
 Global flags on every command: `-v`/`-vv` (info/debug logs), `-q` (silence logs),
-`--user-agent <UA>`. `RUST_LOG` overrides the verbosity flags when set.
+`--user-agent <UA>`, `--cookies <FILE>`. `RUST_LOG` overrides the verbosity
+flags when set.
+
+### Cookies (`--cookies`)
+
+When YouTube answers `Sign in to confirm you're not a bot` (reported as
+`media unavailable: bot-check`), your network — not the video — has been
+flagged, and requests must be authenticated to proceed. Export your browser's
+youtube.com cookies to a Netscape-format `cookies.txt` (any "cookies.txt"
+browser extension, or `yt-dlp --cookies-from-browser firefox --cookies out.txt`)
+and pass it:
+
+```sh
+ytdown --cookies cookies.txt get "https://www.youtube.com/watch?v=..."
+```
+
+Cookies also unlock age-restricted videos. ytdown attaches the matching
+cookies plus the derived `SAPISIDHASH` authorization header to youtube.com
+requests only; treat the exported file like a password.
 
 ### Format selection (`-f`)
 

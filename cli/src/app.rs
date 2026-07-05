@@ -9,10 +9,17 @@ use ytdown::{CollectionKind, Ytdown};
 ///
 /// The hidden `YTDOWN_BASE_URL` env var swaps the default YouTube extractor
 /// for one pointed at an alternate origin — used by the e2e tests.
-pub fn build_ytdown(user_agent: Option<&str>) -> anyhow::Result<Ytdown> {
+pub fn build_ytdown(user_agent: Option<&str>, cookies: Option<&Path>) -> anyhow::Result<Ytdown> {
     let mut b = Ytdown::builder();
     if let Some(ua) = user_agent {
         b = b.user_agent(ua);
+    }
+    if let Some(path) = cookies {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read cookies file {}", path.display()))?;
+        let jar = ytdown::cookies::CookieJar::parse_netscape(&text)
+            .with_context(|| format!("failed to parse cookies file {}", path.display()))?;
+        b = b.cookies(jar);
     }
     if let Ok(base) = std::env::var("YTDOWN_BASE_URL") {
         b = b.clear_extractors().extractor(Box::new(

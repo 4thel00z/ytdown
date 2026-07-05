@@ -47,6 +47,11 @@ struct Cli {
     #[arg(long, global = true)]
     user_agent: Option<String>,
 
+    /// Netscape cookies.txt file with browser cookies (authenticates requests;
+    /// needed when YouTube answers "Sign in to confirm you're not a bot").
+    #[arg(long, global = true, value_name = "FILE")]
+    cookies: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -109,6 +114,17 @@ async fn main() {
     progress::init_tracing(cli.verbose, cli.quiet, &mp);
     if let Err(e) = run(cli, &mp).await {
         eprintln!("error: {e:#}");
+        if let Some(ytdown::Error::Unavailable {
+            reason: ytdown::error::UnavailableReason::BotCheck,
+            ..
+        }) = e.downcast_ref::<ytdown::Error>()
+        {
+            eprintln!(
+                "hint: YouTube flagged this network as a bot; the video itself is fine. \
+                 Export your browser's youtube.com cookies (Netscape cookies.txt format) \
+                 and retry with --cookies <FILE>."
+            );
+        }
         let code = if e.downcast_ref::<selector::UsageError>().is_some() {
             2
         } else {
@@ -120,6 +136,7 @@ async fn main() {
 
 async fn run(cli: Cli, mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
     let ua = cli.user_agent.clone();
+    let cookies = cli.cookies.clone();
     match cli.command {
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
@@ -127,19 +144,19 @@ async fn run(cli: Cli, mp: &indicatif::MultiProgress) -> anyhow::Result<()> {
             Ok(())
         }
         Command::Info { url, pretty, limit } => {
-            let yt = app::build_ytdown(ua.as_deref())?;
+            let yt = app::build_ytdown(ua.as_deref(), cookies.as_deref())?;
             info::run(&yt, &url, pretty, limit).await
         }
         Command::Formats { url, json } => {
-            let yt = app::build_ytdown(ua.as_deref())?;
+            let yt = app::build_ytdown(ua.as_deref(), cookies.as_deref())?;
             formats::run(&yt, &url, json).await
         }
         Command::Search { query, limit, json } => {
-            let yt = app::build_ytdown(ua.as_deref())?;
+            let yt = app::build_ytdown(ua.as_deref(), cookies.as_deref())?;
             search::run(&yt, &query, limit, json).await
         }
         Command::Get(args) => {
-            let yt = app::build_ytdown(ua.as_deref())?;
+            let yt = app::build_ytdown(ua.as_deref(), cookies.as_deref())?;
             get::run(&yt, mp, &args).await
         }
         #[cfg(feature = "serve")]

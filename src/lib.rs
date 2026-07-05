@@ -31,6 +31,9 @@
 /// JavaScript interpreter for solving extractor ciphers.
 pub(crate) mod jsi;
 
+/// Netscape cookies.txt parsing and cookie-authenticated transport.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cookies;
 /// Downloading resolved formats to disk.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod download;
@@ -90,6 +93,8 @@ pub struct YtdownBuilder {
     user_agent: Option<String>,
     #[cfg(not(target_arch = "wasm32"))]
     client: Option<reqwest::Client>,
+    #[cfg(not(target_arch = "wasm32"))]
+    cookies: Option<cookies::CookieJar>,
     extractors: Vec<Box<dyn Extractor>>,
     #[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
     ffmpeg_binary: PathBuf,
@@ -101,6 +106,8 @@ impl Default for YtdownBuilder {
             user_agent: None,
             #[cfg(not(target_arch = "wasm32"))]
             client: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            cookies: None,
             extractors: vec![Box::new(YoutubeExtractor::new())],
             #[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
             ffmpeg_binary: PathBuf::from("ffmpeg"),
@@ -121,6 +128,16 @@ impl YtdownBuilder {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn client(mut self, c: reqwest::Client) -> Self {
         self.client = Some(c);
+        self
+    }
+
+    /// Attach browser cookies to extraction requests (see [`cookies`]).
+    ///
+    /// Authenticated cookies are the remedy for YouTube's anti-bot wall
+    /// ([`error::UnavailableReason::BotCheck`]) and for age-restricted videos.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn cookies(mut self, jar: cookies::CookieJar) -> Self {
+        self.cookies = Some(jar);
         self
     }
 
@@ -167,8 +184,13 @@ impl YtdownBuilder {
             }
         };
 
-        let transport: std::sync::Arc<dyn transport::HttpClient> =
+        let mut transport: std::sync::Arc<dyn transport::HttpClient> =
             std::sync::Arc::new(transport::ReqwestClient::new(http.clone()));
+        if let Some(jar) = self.cookies {
+            if !jar.is_empty() {
+                transport = std::sync::Arc::new(cookies::CookieTransport::new(transport, jar));
+            }
+        }
 
         Ok(Ytdown {
             ctx: ExtractorContext::new(transport),
