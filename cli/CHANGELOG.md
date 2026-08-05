@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.5.0](https://github.com/4thel00z/ytdown/compare/ytdown-cli-v0.4.0...ytdown-cli-v0.5.0) (2026-08-05)
+
+
+### Features
+
+* add Reddit, TikTok, Instagram, and X/Twitter extractors ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+* **cookies:** derive the X-CSRFToken header from a csrftoken cookie for Instagram ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+* **download:** formats carry required HTTP headers (Cookie/Referer/UA) that the downloader now sends with every request ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+* **instagram:** extract posts and reels via the GraphQL shortcode query (cookies-aware, share links supported) ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+* **reddit:** extract v.redd.it post videos as split DASH formats plus fallback ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+* **tiktok:** extract tiktok.com videos, including vm./vt./t share shortlinks ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+* **transport:** report the post-redirect final URL on HTTP responses ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+* **twitter:** extract tweet videos via the public syndication API (no login) ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+
+
+### Bug Fixes
+
+* **cli:** make the bot-check hint site-agnostic instead of YouTube-specific ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+* **http:** default the HTTP client to platform TLS — Reddit's edge blocklists the rustls ClientHello fingerprint ([9a1292e](https://github.com/4thel00z/ytdown/commit/9a1292ee6e0f4ec2d524dff7c62e8a97f93f210f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * ytdown bumped from 0.7.0 to 0.8.0
+
 ## [0.4.0](https://github.com/4thel00z/ytdown/compare/ytdown-cli-v0.3.1...ytdown-cli-v0.4.0) (2026-07-05)
 
 
