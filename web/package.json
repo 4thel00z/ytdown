@@ -1,6 +1,6 @@
 {
   "name": "@4thel00z/ytdown",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Resolve and download YouTube media from the browser (WASM core).",
   "license": "MIT OR Apache-2.0",
   "type": "module",
