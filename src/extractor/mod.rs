@@ -1,5 +1,15 @@
 //! Extractor trait and registry: URL-to-media dispatch.
 
+/// Instagram extractor implementation.
+pub mod instagram;
+/// Reddit extractor implementation.
+pub mod reddit;
+/// Helpers shared by several site extractors.
+pub(crate) mod shared;
+/// TikTok extractor implementation.
+pub mod tiktok;
+/// X/Twitter extractor implementation.
+pub mod twitter;
 /// YouTube extractor implementation.
 pub mod youtube;
 

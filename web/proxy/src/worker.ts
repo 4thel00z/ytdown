@@ -37,6 +37,9 @@ export default {
     const upstream = await fetch(target, init);
     const headers = new Headers(upstream.headers);
     for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
+    // Surface the upstream's post-redirect URL: the browser only sees the
+    // proxy URL, but extractors need the resolved target to follow shortlinks.
+    if (upstream.url) headers.set("x-ytdown-final-url", upstream.url);
     return new Response(upstream.body, { status: upstream.status, headers });
   },
 };

@@ -71,10 +71,17 @@ impl HttpClient for JsHttpClient {
             _ => Vec::new(),
         };
         let headers = read_headers(&resp);
+        // Optional `url` property: the JS side passes `response.url` through so
+        // extractors can resolve shortlink redirects.
+        let final_url = Reflect::get(&resp, &JsValue::from_str("url"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .filter(|s| !s.is_empty());
         Ok(HttpResponse {
             status,
             headers,
             body,
+            final_url,
         })
     }
 }

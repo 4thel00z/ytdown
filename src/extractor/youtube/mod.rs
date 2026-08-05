@@ -472,6 +472,7 @@ fn build_format(raw: &RawFormat, url: String) -> Format {
             .as_deref()
             .and_then(|s| s.parse::<u64>().ok()),
         bitrate: raw.bitrate,
+        http_headers: Vec::new(),
     }
 }
 

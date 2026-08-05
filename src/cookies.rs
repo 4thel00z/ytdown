@@ -174,6 +174,11 @@ impl HttpClient for CookieTransport {
                             .push(("Authorization".into(), sapisid_hash(sapisid, &origin, now)));
                         req.headers.push(("X-Origin".into(), origin));
                     }
+                    // Meta (Instagram) endpoints require cookie-authenticated
+                    // requests to echo the csrftoken cookie as X-CSRFToken.
+                    if let Some(csrf) = self.jar.get(host, "csrftoken", https, now) {
+                        req.headers.push(("X-CSRFToken".into(), csrf.to_string()));
+                    }
                 }
             }
         }
@@ -272,5 +277,35 @@ mod transport_tests {
             .await
             .unwrap();
         assert_eq!(resp.status, 200);
+    }
+
+    /// Instagram's GraphQL endpoints reject cookie-authenticated requests that
+    /// do not echo the `csrftoken` cookie as `X-CSRFToken`.
+    #[tokio::test]
+    async fn echoes_csrftoken_cookie_as_header() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql/query"))
+            .and(|req: &Request| {
+                req.headers.get("x-csrftoken").and_then(|v| v.to_str().ok()) == Some("tok123")
+            })
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let jar = CookieJar::parse_netscape("127.0.0.1\tFALSE\t/\tFALSE\t0\tcsrftoken\ttok123\n")
+            .unwrap();
+        let client = CookieTransport::new(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            jar,
+        );
+        let resp = client
+            .execute(HttpRequest::post(
+                "test",
+                format!("{}/graphql/query", server.uri()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status, 200, "X-CSRFToken header was not attached");
     }
 }

@@ -1,0 +1,41 @@
+{
+  "data": {
+    "xdt_shortcode_media": {
+      "__typename": "XDTGraphVideo",
+      "id": "3141592653589793238",
+      "shortcode": "Cxample123",
+      "dimensions": { "height": 1920, "width": 1080 },
+      "video_url": "https://scontent.cdninstagram.example/v/progressive.mp4?efg=abc&_nc_ht=x",
+      "video_duration": 12.345,
+      "has_audio": true,
+      "video_view_count": 98765,
+      "is_video": true,
+      "title": "",
+      "edge_media_to_caption": {
+        "edges": [{ "node": { "text": "Sunset reel #sunset" } }]
+      },
+      "owner": { "id": "555666777", "username": "reeluser" },
+      "taken_at_timestamp": 1700000000,
+      "display_url": "https://scontent.cdninstagram.example/v/cover.jpg",
+      "display_resources": [
+        {
+          "src": "https://scontent.cdninstagram.example/v/small.jpg",
+          "config_width": 640,
+          "config_height": 1136
+        },
+        {
+          "src": "https://scontent.cdninstagram.example/v/large.jpg",
+          "config_width": 1080,
+          "config_height": 1920
+        }
+      ],
+      "dash_info": {
+        "is_dash_eligible": true,
+        "video_dash_manifest": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"static\" mediaPresentationDuration=\"PT0H0M12.345S\"><Period duration=\"PT0H0M12.345S\"><AdaptationSet segmentAlignment=\"true\" contentType=\"video\"><Representation mimeType=\"video/mp4\" codecs=\"avc1.64001F\" bandwidth=\"1500000\" width=\"720\" height=\"1280\" frameRate=\"30\"><BaseURL>https://scontent.cdninstagram.example/v/dash_hd.mp4?efg=1&amp;oh=2</BaseURL><SegmentBase indexRange=\"880-995\"><Initialization range=\"0-879\"/></SegmentBase></Representation></AdaptationSet><AdaptationSet segmentAlignment=\"true\" contentType=\"audio\"><Representation mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\" bandwidth=\"96000\" audioSamplingRate=\"44100\"><BaseURL>https://scontent.cdninstagram.example/v/dash_audio.mp4?efg=3&amp;oh=4</BaseURL><SegmentBase indexRange=\"820-935\"><Initialization range=\"0-819\"/></SegmentBase></Representation></AdaptationSet></Period></MPD>",
+        "number_of_qualities": 1
+      }
+    }
+  },
+  "extensions": { "is_final": true },
+  "status": "ok"
+}

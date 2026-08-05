@@ -103,6 +103,11 @@ pub struct Format {
     pub filesize: Option<u64>,
     /// Total bitrate in bits/s, if known.
     pub bitrate: Option<u64>,
+    /// Headers the media URL requires (auth minted during extraction, e.g. a
+    /// `Cookie` or `Referer`). [`Ytdown::download`](crate::Ytdown) sends them
+    /// with every request; custom downloaders must do the same.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub http_headers: Vec<(String, String)>,
 }
 
 /// Parameters of a video stream.

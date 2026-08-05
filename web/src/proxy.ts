@@ -12,6 +12,8 @@ export interface WasmResponse {
   status: number;
   headers: [string, string][];
   body?: Uint8Array;
+  /** The URL the response was served from, after redirects (if known). */
+  url?: string;
 }
 
 /** The callback shape the WASM `Ytdown` constructor takes. */
@@ -51,6 +53,9 @@ export function makeProxyFetch(
     const buf = new Uint8Array(await res.arrayBuffer());
     const respHeaders: [string, string][] = [];
     res.headers.forEach((v, k) => respHeaders.push([k, v]));
-    return { status: res.status, headers: respHeaders, body: buf };
+    // The proxy exposes the upstream's post-redirect URL; `res.url` itself
+    // would only be the proxy URL.
+    const finalUrl = res.headers.get("x-ytdown-final-url") ?? undefined;
+    return { status: res.status, headers: respHeaders, body: buf, url: finalUrl };
   };
 }

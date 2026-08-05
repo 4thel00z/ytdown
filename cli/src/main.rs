@@ -120,8 +120,8 @@ async fn main() {
         }) = e.downcast_ref::<ytdown::Error>()
         {
             eprintln!(
-                "hint: YouTube flagged this network as a bot; the video itself is fine. \
-                 Export your browser's youtube.com cookies (Netscape cookies.txt format) \
+                "hint: the site flagged this network as a bot; the video itself is fine. \
+                 Export your browser's cookies for the site (Netscape cookies.txt format) \
                  and retry with --cookies <FILE>."
             );
         }

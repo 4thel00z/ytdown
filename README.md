@@ -68,9 +68,11 @@ async fn main() -> ytdown::Result<()> {
 
 ## Supported URLs
 
-YouTube is the only extractor registered by default (embedders can add their
-own via the [`Extractor`] trait). Accepted hosts: `youtube.com`, `www.`/`m.`/
-`music.youtube.com`, `youtube-nocookie.com`, and `youtu.be`.
+YouTube, Reddit, TikTok, Instagram, and X/Twitter extractors are registered by
+default (embedders can add their own via the [`Extractor`] trait).
+
+**YouTube** — accepted hosts: `youtube.com`, `www.`/`m.`/`music.youtube.com`,
+`youtube-nocookie.com`, and `youtu.be`.
 
 | Kind | URL shapes |
 |---|---|
@@ -80,8 +82,62 @@ own via the [`Extractor`] trait). Accepted hosts: `youtube.com`, `www.`/`m.`/
 | Search | `ytsearch:QUERY` pseudo-URL (mirrors yt-dlp) |
 
 A watch URL that also carries `&list=` resolves to the **video** (the `v=`
-parameter wins). Anything else fails fast with `Error::UnsupportedUrl` —
-no network request is made.
+parameter wins).
+
+**Reddit** — accepted hosts: `reddit.com` and any subdomain (`www.`, `old.`,
+`new.`, `np.`, `sh.`), plus `redd.it` shortlinks.
+
+| Kind | URL shapes |
+|---|---|
+| Post | `…/r/SUB/comments/ID/slug/`, `…/comments/ID`, `…/user/NAME/comments/ID/…`, `redd.it/ID` |
+
+Reddit-hosted (`v.redd.it`) video is served as split streams: the DASH
+representations become video-only and audio-only formats (merge with
+`ytdown get --merge` / [`Ytdown::download_merged`]). Crossposts and link
+posts with a Reddit video preview resolve to that video; posts linking
+external media fail with an error naming the external URL. Direct
+`v.redd.it` links are not supported — pass the post URL instead.
+
+**TikTok** — accepted hosts: `tiktok.com` (and subdomains) plus the `vm.`/`vt.`
+share shortlink hosts.
+
+| Kind | URL shapes |
+|---|---|
+| Video | `…/@user/video/ID`, `tiktok.com/t/CODE`, `vm.tiktok.com/CODE`, `vt.tiktok.com/CODE` |
+
+Renditions are progressive (muxed) MP4s. TikTok's media CDN gates play URLs on
+session cookies minted with the page, so each format carries the required
+`Cookie`/`Referer`/`User-Agent` in `http_headers` — `ytdown get` and
+`Ytdown::download` send them automatically. Photo/slideshow posts are not
+supported.
+
+**Instagram** — accepted hosts: `instagram.com` and subdomains.
+
+| Kind | URL shapes |
+|---|---|
+| Post/Reel | `…/p/CODE`, `…/reel(s)/CODE`, `…/tv/CODE`, `…/USER/p/CODE`, `…/share/…` app links |
+
+Formats are the progressive MP4 plus Instagram's split DASH representations.
+Instagram aggressively gates anonymous API access: expect
+`media unavailable: bot-check` without cookies and pass a logged-in browser
+export via `--cookies` (the required `X-CSRFToken` header is derived
+automatically). Carousels resolve to their first video item; stories are not
+supported.
+
+**X (Twitter)** — accepted hosts: `x.com`, `twitter.com` (and `mobile.`
+subdomains).
+
+| Kind | URL shapes |
+|---|---|
+| Tweet | `…/USER/status/ID`, `…/i/status/ID`, `…/i/web/status/ID` |
+
+Resolution uses the public syndication (embed) API — no login required.
+Formats are the progressive MP4 variants (HLS playlists are skipped). Tweets
+with several videos resolve to the first; age-restricted tweets are reported
+as such.
+
+Anything else fails fast with `Error::UnsupportedUrl` — no network request
+is made.
 
 ## Browser (WASM) + TypeScript SDK
 
@@ -262,9 +318,12 @@ and pass it:
 ytdown --cookies cookies.txt get "https://www.youtube.com/watch?v=..."
 ```
 
-Cookies also unlock age-restricted videos. ytdown attaches the matching
-cookies plus the derived `SAPISIDHASH` authorization header to youtube.com
-requests only; treat the exported file like a password.
+Cookies also unlock age-restricted videos. The same remedy applies to Reddit:
+when its edge blocks a flagged network (`media unavailable: bot-check`), pass a
+`cookies.txt` exported from a browser session that has visited reddit.com.
+ytdown attaches cookies only to requests whose host matches their domain (plus
+the derived `SAPISIDHASH` authorization header on youtube.com requests); treat
+the exported file like a password.
 
 ### Format selection (`-f`)
 

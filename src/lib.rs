@@ -69,6 +69,10 @@ pub use types::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 use download::{Downloader, ProgressCallback};
+use extractor::instagram::InstagramExtractor;
+use extractor::reddit::RedditExtractor;
+use extractor::tiktok::TiktokExtractor;
+use extractor::twitter::TwitterExtractor;
 use extractor::youtube::YoutubeExtractor;
 
 /// The library entry point: resolves URLs into media and downloads formats.
@@ -87,8 +91,8 @@ pub struct Ytdown {
 
 /// Builder for [`Ytdown`].
 ///
-/// Registers the YouTube extractor by default; call [`YtdownBuilder::extractor`]
-/// to add more.
+/// Registers the YouTube and Reddit extractors by default; call
+/// [`YtdownBuilder::extractor`] to add more.
 pub struct YtdownBuilder {
     user_agent: Option<String>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -108,7 +112,13 @@ impl Default for YtdownBuilder {
             client: None,
             #[cfg(not(target_arch = "wasm32"))]
             cookies: None,
-            extractors: vec![Box::new(YoutubeExtractor::new())],
+            extractors: vec![
+                Box::new(YoutubeExtractor::new()),
+                Box::new(RedditExtractor::new()),
+                Box::new(TiktokExtractor::new()),
+                Box::new(InstagramExtractor::new()),
+                Box::new(TwitterExtractor::new()),
+            ],
             #[cfg(all(feature = "ffmpeg", not(target_arch = "wasm32")))]
             ffmpeg_binary: PathBuf::from("ffmpeg"),
         }
@@ -173,7 +183,11 @@ impl YtdownBuilder {
         let http = match self.client {
             Some(c) => c,
             None => {
-                let mut builder = reqwest::Client::builder();
+                // Platform TLS, not rustls: Reddit's edge blocklists the rustls
+                // ClientHello fingerprint (403 for any request, cookies or not)
+                // while OpenSSL/SecureTransport/LibreSSL hellos pass. Embedders
+                // that prefer rustls can supply their own client via `client()`.
+                let mut builder = reqwest::Client::builder().use_native_tls();
                 if let Some(ua) = &self.user_agent {
                     builder = builder.user_agent(ua);
                 }
@@ -243,7 +257,10 @@ impl Ytdown {
             downloader: &self.downloader,
             url: format.url.clone(),
             dest: dest.as_ref().to_path_buf(),
-            options: DownloadOptions::default(),
+            options: DownloadOptions {
+                headers: format.http_headers.clone(),
+                ..DownloadOptions::default()
+            },
         }
     }
 
@@ -262,11 +279,15 @@ impl Ytdown {
         let video_tmp = sibling_tmp(dest, "video.part");
         let audio_tmp = sibling_tmp(dest, "audio.part");
 
+        let opts_for = |f: &Format| DownloadOptions {
+            headers: f.http_headers.clone(),
+            ..DownloadOptions::default()
+        };
         self.downloader
-            .download(&video.url, &video_tmp, DownloadOptions::default())
+            .download(&video.url, &video_tmp, opts_for(video))
             .await?;
         self.downloader
-            .download(&audio.url, &audio_tmp, DownloadOptions::default())
+            .download(&audio.url, &audio_tmp, opts_for(audio))
             .await?;
 
         let merger = postprocess::FfmpegMerger::with_binary(self.ffmpeg_binary.clone());
@@ -387,6 +408,102 @@ mod tests {
         assert_eq!(builder.options.chunk_size, 1234);
         assert_eq!(builder.options.retries, 7);
         assert!(!builder.options.resume);
+    }
+
+    /// A format's `http_headers` (auth minted during extraction, e.g. TikTok's
+    /// `tt_chain_token` cookie) must reach the downloader's options.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn format_http_headers_reach_download_options() {
+        let yt = Ytdown::builder().build().expect("build");
+        let fmt = Format {
+            url: "https://example.invalid/x".into(),
+            http_headers: vec![("Cookie".into(), "tt_chain_token=abc".into())],
+            ..Format::default()
+        };
+        let builder = yt.download(&fmt, "out.bin");
+        assert_eq!(
+            builder.options.headers,
+            vec![("Cookie".to_string(), "tt_chain_token=abc".to_string())]
+        );
+    }
+
+    /// Reddit post URLs must be claimed by a default-registered extractor:
+    /// with all traffic proxied into a dead local port, a registered extractor
+    /// fails with a network error, while an unregistered one would
+    /// short-circuit with `UnsupportedUrl`.
+    #[tokio::test]
+    async fn reddit_extractor_registered_by_default() {
+        let client = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all("http://127.0.0.1:1").expect("proxy"))
+            .build()
+            .expect("client");
+        let yt = Ytdown::builder().client(client).build().expect("build");
+        let err = yt
+            .resolve("https://www.reddit.com/r/videos/comments/1abc23/title/")
+            .await
+            .unwrap_err();
+        assert!(
+            !matches!(err, Error::UnsupportedUrl(_)),
+            "reddit URL was not claimed by any default extractor: {err:?}"
+        );
+    }
+
+    /// TikTok post URLs must be claimed by a default-registered extractor
+    /// (same dead-proxy trick as the reddit registration test).
+    #[tokio::test]
+    async fn tiktok_extractor_registered_by_default() {
+        let client = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all("http://127.0.0.1:1").expect("proxy"))
+            .build()
+            .expect("client");
+        let yt = Ytdown::builder().client(client).build().expect("build");
+        let err = yt
+            .resolve("https://www.tiktok.com/@someuser/video/7123456789012345678")
+            .await
+            .unwrap_err();
+        assert!(
+            !matches!(err, Error::UnsupportedUrl(_)),
+            "tiktok URL was not claimed by any default extractor: {err:?}"
+        );
+    }
+
+    /// Instagram post URLs must be claimed by a default-registered extractor
+    /// (same dead-proxy trick as the reddit registration test).
+    #[tokio::test]
+    async fn instagram_extractor_registered_by_default() {
+        let client = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all("http://127.0.0.1:1").expect("proxy"))
+            .build()
+            .expect("client");
+        let yt = Ytdown::builder().client(client).build().expect("build");
+        let err = yt
+            .resolve("https://www.instagram.com/reel/Cxample123/")
+            .await
+            .unwrap_err();
+        assert!(
+            !matches!(err, Error::UnsupportedUrl(_)),
+            "instagram URL was not claimed by any default extractor: {err:?}"
+        );
+    }
+
+    /// Tweet URLs must be claimed by a default-registered extractor
+    /// (same dead-proxy trick as the reddit registration test).
+    #[tokio::test]
+    async fn twitter_extractor_registered_by_default() {
+        let client = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all("http://127.0.0.1:1").expect("proxy"))
+            .build()
+            .expect("client");
+        let yt = Ytdown::builder().client(client).build().expect("build");
+        let err = yt
+            .resolve("https://x.com/jack/status/1668680561921038336")
+            .await
+            .unwrap_err();
+        assert!(
+            !matches!(err, Error::UnsupportedUrl(_)),
+            "tweet URL was not claimed by any default extractor: {err:?}"
+        );
     }
 
     /// `clear_extractors` removes the default YouTube extractor, so nothing

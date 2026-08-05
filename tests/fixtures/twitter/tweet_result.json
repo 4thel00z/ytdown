@@ -1,0 +1,62 @@
+{
+  "__typename": "Tweet",
+  "lang": "en",
+  "favorite_count": 100,
+  "possibly_sensitive": false,
+  "created_at": "2023-06-13T15:30:00.000Z",
+  "display_text_range": [0, 29],
+  "entities": { "hashtags": [], "urls": [], "user_mentions": [], "symbols": [] },
+  "id_str": "1668680561921038336",
+  "text": "Check out this awesome clip 🎬",
+  "user": {
+    "id_str": "12",
+    "name": "Jack",
+    "screen_name": "jack",
+    "verified": false,
+    "profile_image_url_https": "https://pbs.twimg.example/profile.jpg"
+  },
+  "photos": [],
+  "video": {
+    "aspectRatio": [9, 16],
+    "contentType": "media_entity",
+    "durationMs": 21000,
+    "mediaAvailability": { "status": "available" },
+    "poster": "https://pbs.twimg.example/poster.jpg",
+    "viewCount": 4242,
+    "variants": [
+      { "type": "application/x-mpegURL", "src": "https://video.twimg.example/ext_tw_video/1/pl/master.m3u8" },
+      { "type": "video/mp4", "src": "https://video.twimg.example/ext_tw_video/1/vid/avc1/320x568/low.mp4" }
+    ]
+  },
+  "mediaDetails": [
+    {
+      "display_url": "pic.twitter.com/xyz",
+      "expanded_url": "https://twitter.com/jack/status/1668680561921038336/video/1",
+      "media_url_https": "https://pbs.twimg.example/poster.jpg",
+      "type": "video",
+      "original_info": { "height": 1280, "width": 720 },
+      "video_info": {
+        "aspect_ratio": [9, 16],
+        "duration_millis": 21000,
+        "variants": [
+          {
+            "content_type": "application/x-mpegURL",
+            "url": "https://video.twimg.example/ext_tw_video/1/pl/master.m3u8"
+          },
+          {
+            "bitrate": 632000,
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.example/ext_tw_video/1/vid/avc1/320x568/low.mp4"
+          },
+          {
+            "bitrate": 2176000,
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.example/ext_tw_video/1/vid/avc1/720x1280/high.mp4"
+          }
+        ]
+      }
+    }
+  ],
+  "isEdited": false,
+  "isStaleEdit": false
+}

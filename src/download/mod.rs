@@ -28,6 +28,10 @@ pub struct DownloadOptions {
     pub retries: u32,
     /// Optional progress observer.
     pub progress: Option<ProgressCallback>,
+    /// Extra headers sent with every request (some media URLs are gated on
+    /// auth headers minted during extraction, e.g. a `Cookie` or `Referer`;
+    /// see [`Format::http_headers`](crate::types::Format::http_headers)).
+    pub headers: Vec<(String, String)>,
 }
 
 impl Default for DownloadOptions {
@@ -38,6 +42,7 @@ impl Default for DownloadOptions {
             resume: true,
             retries: 3,
             progress: None,
+            headers: Vec::new(),
         }
     }
 }
@@ -69,6 +74,15 @@ impl Downloader {
     /// Construct a downloader over an existing shared HTTP client.
     pub fn new(http: reqwest::Client) -> Self {
         Self { http }
+    }
+
+    /// A `GET` request builder carrying the options' extra headers.
+    fn get(&self, url: &str, opts: &DownloadOptions) -> reqwest::RequestBuilder {
+        let mut req = self.http.get(url);
+        for (k, v) in &opts.headers {
+            req = req.header(k.as_str(), v.as_str());
+        }
+        req
     }
 
     /// Download `url` to `dest`.
@@ -168,8 +182,7 @@ impl Downloader {
     async fn probe(&self, url: &str, opts: &DownloadOptions) -> crate::Result<RemoteInfo> {
         let resp = self
             .with_retries(opts, || {
-                self.http
-                    .get(url)
+                self.get(url, opts)
                     .header(reqwest::header::RANGE, "bytes=0-0")
                     .send()
             })
@@ -211,7 +224,7 @@ impl Downloader {
     ) -> crate::Result<()> {
         let resp = self
             .with_retries(opts, || {
-                let mut req = self.http.get(url);
+                let mut req = self.get(url, opts);
                 if start_offset > 0 {
                     req = req.header(reqwest::header::RANGE, format!("bytes={start_offset}-"));
                 }
@@ -288,8 +301,7 @@ impl Downloader {
             let end = (pos + chunk_size - 1).min(total - 1);
             let resp = self
                 .with_retries(opts, || {
-                    self.http
-                        .get(url)
+                    self.get(url, opts)
                         .header(reqwest::header::RANGE, format!("bytes={pos}-{end}"))
                         .send()
                 })
@@ -427,8 +439,7 @@ impl Downloader {
     ) -> crate::Result<()> {
         let resp = self
             .with_retries(opts, || {
-                self.http
-                    .get(url)
+                self.get(url, opts)
                     .header(reqwest::header::RANGE, format!("bytes={start}-{end}"))
                     .send()
             })
@@ -655,6 +666,35 @@ mod tests {
             &format!("{}/file", server.uri()),
             &dest,
             DownloadOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+    }
+
+    /// Formats can require auth headers on their media URL (e.g. TikTok's
+    /// `tt_chain_token` cookie); every downloader request must carry them.
+    #[tokio::test]
+    async fn sends_configured_headers_on_every_request() {
+        let server = MockServer::start().await;
+        let body = vec![7u8; 2000];
+        // Only answer requests carrying the cookie; everything else 404s.
+        Mock::given(path("/gated"))
+            .and(wiremock::matchers::header("cookie", "tt_chain_token=abc"))
+            .respond_with(RangeResponder { body: body.clone() })
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.bin");
+        let dl = Downloader::new(reqwest::Client::new());
+        dl.download(
+            &format!("{}/gated", server.uri()),
+            &dest,
+            DownloadOptions {
+                headers: vec![("Cookie".into(), "tt_chain_token=abc".into())],
+                ..DownloadOptions::default()
+            },
         )
         .await
         .unwrap();

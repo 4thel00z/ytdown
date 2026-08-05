@@ -1,0 +1,66 @@
+[
+  {
+    "kind": "Listing",
+    "data": {
+      "children": [
+        {
+          "kind": "t3",
+          "data": {
+            "id": "1abc23",
+            "title": "Cat does a backflip",
+            "selftext": "",
+            "author": "someuser",
+            "subreddit": "videos",
+            "subreddit_name_prefixed": "r/videos",
+            "created_utc": 1638316800.0,
+            "permalink": "/r/videos/comments/1abc23/cat_does_a_backflip/",
+            "num_comments": 42,
+            "score": 1234,
+            "over_18": false,
+            "is_video": true,
+            "thumbnail": "https://b.thumbs.redditmedia.com/thumb.jpg",
+            "preview": {
+              "enabled": true,
+              "images": [
+                {
+                  "source": {
+                    "url": "https://preview.redd.it/full.jpg?auto=webp&s=aaa",
+                    "width": 1280,
+                    "height": 720
+                  },
+                  "resolutions": [
+                    {
+                      "url": "https://preview.redd.it/small.jpg?width=108&s=bbb",
+                      "width": 108,
+                      "height": 60
+                    }
+                  ]
+                }
+              ]
+            },
+            "secure_media": {
+              "reddit_video": {
+                "bitrate_kbps": 2400,
+                "fallback_url": "https://v.redd.it/media123/DASH_720.mp4?source=fallback",
+                "has_audio": true,
+                "height": 720,
+                "width": 1280,
+                "scrubber_media_url": "https://v.redd.it/media123/DASH_96.mp4",
+                "dash_url": "https://v.redd.it/media123/DASHPlaylist.mpd?a=1662&v=1&f=sd",
+                "duration": 14,
+                "hls_url": "https://v.redd.it/media123/HLSPlaylist.m3u8?a=1662&v=1&f=sd",
+                "is_gif": false,
+                "transcoding_status": "completed"
+              }
+            },
+            "media": null
+          }
+        }
+      ]
+    }
+  },
+  {
+    "kind": "Listing",
+    "data": { "children": [] }
+  }
+]

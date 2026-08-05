@@ -76,6 +76,10 @@ pub struct HttpResponse {
     pub headers: Vec<(String, String)>,
     /// Fully-buffered response body.
     pub body: Vec<u8>,
+    /// The URL the response was served from, after following any redirects.
+    /// `None` when the transport cannot know it (e.g. an opaque JS `fetch`).
+    /// Extractors use this to resolve share-shortlinks into canonical URLs.
+    pub final_url: Option<String>,
 }
 
 impl HttpResponse {
@@ -157,6 +161,7 @@ impl HttpClient for ReqwestClient {
             message: e.to_string(),
         })?;
 
+        let final_url = Some(resp.url().to_string());
         let status = resp.status().as_u16();
         let headers = resp
             .headers()
@@ -197,6 +202,7 @@ impl HttpClient for ReqwestClient {
             status,
             headers,
             body: buf,
+            final_url,
         })
     }
 }
@@ -225,6 +231,7 @@ mod tests {
             status: 204,
             headers: vec![("Content-Length".into(), "0".into())],
             body: Vec::new(),
+            final_url: None,
         };
         assert!(resp.is_success());
         assert_eq!(resp.header("content-length"), Some("0"));
@@ -263,6 +270,33 @@ mod reqwest_tests {
             .unwrap();
         assert_eq!(resp.status, 200);
         assert_eq!(resp.body, b"pong");
+    }
+
+    #[tokio::test]
+    async fn reqwest_client_reports_final_url_after_redirect() {
+        let server = MockServer::start().await;
+        Mock::given(m("GET"))
+            .and(path("/short"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", "/final"))
+            .mount(&server)
+            .await;
+        Mock::given(m("GET"))
+            .and(path("/final"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("here"))
+            .mount(&server)
+            .await;
+
+        let client = ReqwestClient::new(reqwest::Client::new());
+        let resp = client
+            .execute(HttpRequest::get("test", format!("{}/short", server.uri())))
+            .await
+            .unwrap();
+        assert_eq!(resp.status, 200);
+        // The resolved URL, not the request URL echoed back.
+        assert_eq!(
+            resp.final_url.as_deref(),
+            Some(format!("{}/final", server.uri()).as_str())
+        );
     }
 
     #[tokio::test]
