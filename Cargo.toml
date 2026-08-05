@@ -11,8 +11,18 @@ categories = ["multimedia", "api-bindings"]
 exclude = ["ytdown-py", "ytdown-wasm"]
 
 [features]
-default = []
+default = ["native-tls"]
 ffmpeg = []
+# TLS backend for the default HTTP client. Platform TLS is the default because
+# some sites (Reddit) blocklist the rustls ClientHello fingerprint and answer
+# 403 to every request made through it. On Linux this links against the system
+# OpenSSL, so `libssl-dev`/`openssl-devel` must be present at build time; use
+# `native-tls-vendored` to compile OpenSSL from source instead (needed inside
+# manylinux containers, which ship no OpenSSL headers).
+native-tls = ["reqwest/native-tls"]
+native-tls-vendored = ["reqwest/native-tls-vendored"]
+# Opt into rustls instead (no OpenSSL dependency, but see the caveat above).
+rustls-tls = ["reqwest/rustls-tls"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -27,7 +37,7 @@ tracing = "0.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process", "sync", "time"] }
-reqwest = { version = "0.12", default-features = false, features = ["native-tls", "rustls-tls", "json", "gzip", "stream", "cookies"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "stream", "cookies"] }
 sha1 = "0.10"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

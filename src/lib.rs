@@ -186,8 +186,12 @@ impl YtdownBuilder {
                 // Platform TLS, not rustls: Reddit's edge blocklists the rustls
                 // ClientHello fingerprint (403 for any request, cookies or not)
                 // while OpenSSL/SecureTransport/LibreSSL hellos pass. Embedders
-                // that prefer rustls can supply their own client via `client()`.
+                // that prefer rustls can build with `--no-default-features
+                // --features rustls-tls`, or supply a client via `client()`.
+                #[cfg(any(feature = "native-tls", feature = "native-tls-vendored"))]
                 let mut builder = reqwest::Client::builder().use_native_tls();
+                #[cfg(not(any(feature = "native-tls", feature = "native-tls-vendored")))]
+                let mut builder = reqwest::Client::builder();
                 if let Some(ua) = &self.user_agent {
                     builder = builder.user_agent(ua);
                 }

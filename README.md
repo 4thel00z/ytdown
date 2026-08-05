@@ -218,6 +218,25 @@ subcommand baked in, use `make install` (runs `cargo install --path cli
 | Feature  | Default | Description                                                          |
 |----------|---------|----------------------------------------------------------------------|
 | `ffmpeg` | off     | Mux separate DASH audio + video streams via the system `ffmpeg` binary. |
+| `native-tls` | **on** | Platform TLS for the default HTTP client (OpenSSL on Linux, Security.framework on macOS, SChannel on Windows). |
+| `native-tls-vendored` | off | Same, but compiles OpenSSL from source — for build environments without OpenSSL headers (e.g. manylinux containers). |
+| `rustls-tls` | off | Use rustls instead of platform TLS. |
+
+Platform TLS is the default deliberately: some sites (Reddit) blocklist the
+rustls ClientHello fingerprint and answer `403` to every request made through
+it, cookies or not. The trade-off is that **building on Linux needs OpenSSL
+headers** (`libssl-dev` / `openssl-devel`). Where that is impractical, either
+vendor OpenSSL:
+
+```toml
+ytdown = { version = "0.8", default-features = false, features = ["native-tls-vendored"] }
+```
+
+or opt into rustls (accepting the Reddit caveat):
+
+```toml
+ytdown = { version = "0.8", default-features = false, features = ["rustls-tls"] }
+```
 
 ## Architecture
 
