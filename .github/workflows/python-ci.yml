@@ -60,6 +60,17 @@ jobs:
           args: --release --out dist
           manylinux: auto
           sccache: true
+          # ytdown-py vendors OpenSSL (no system OpenSSL in the manylinux
+          # images); OpenSSL's ./Configure needs the IPC::Cmd perl module,
+          # which those images also lack.
+          before-script-linux: |
+            if command -v yum >/dev/null 2>&1; then
+              yum install -y perl-IPC-Cmd perl-core
+            elif command -v dnf >/dev/null 2>&1; then
+              dnf install -y perl-IPC-Cmd perl-core
+            elif command -v apt-get >/dev/null 2>&1; then
+              apt-get update && apt-get install -y perl
+            fi
       - name: Import smoke test
         if: matrix.platform.target == 'x86_64' || runner.os == 'macOS'
         shell: bash

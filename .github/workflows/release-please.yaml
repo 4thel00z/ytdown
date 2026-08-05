@@ -105,6 +105,16 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist
           manylinux: auto
+          # Keep in sync with python-ci.yml: ytdown-py vendors OpenSSL, whose
+          # ./Configure needs the IPC::Cmd perl module the manylinux images lack.
+          before-script-linux: |
+            if command -v yum >/dev/null 2>&1; then
+              yum install -y perl-IPC-Cmd perl-core
+            elif command -v dnf >/dev/null 2>&1; then
+              dnf install -y perl-IPC-Cmd perl-core
+            elif command -v apt-get >/dev/null 2>&1; then
+              apt-get update && apt-get install -y perl
+            fi
       - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ runner.os }}-${{ matrix.platform.target }}
