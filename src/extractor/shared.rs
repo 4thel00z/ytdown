@@ -2,6 +2,21 @@
 //! lightweight parser for flat DASH manifests (Reddit, Instagram).
 
 use crate::types::{AudioStream, Container, Format, VideoStream};
+/// Join the `name=value` parts of every `Set-Cookie` response header into a
+/// single `Cookie` header value.
+pub(crate) fn session_cookie_header(headers: &[(String, String)]) -> Option<String> {
+    let pairs: Vec<&str> = headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("set-cookie"))
+        .filter_map(|(_, v)| v.split(';').next())
+        .map(str::trim)
+        .filter(|s| s.contains('='))
+        .collect();
+    if pairs.is_empty() {
+        return None;
+    }
+    Some(pairs.join("; "))
+}
 
 /// Convert a Unix-epoch timestamp to yt-dlp's `YYYYMMDD` (UTC).
 ///

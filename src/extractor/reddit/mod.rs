@@ -5,7 +5,7 @@
 use url::Url;
 
 use crate::error::UnavailableReason;
-use crate::extractor::shared::{formats_from_mpd, upload_date_from_epoch};
+use crate::extractor::shared::{formats_from_mpd, session_cookie_header, upload_date_from_epoch};
 use crate::extractor::{Extractor, ExtractorContext};
 use crate::transport::HttpRequest;
 use crate::types::{Container, Format, MediaInfo, Thumbnail, VideoInfo, VideoStream};
@@ -84,12 +84,39 @@ impl RedditExtractor {
         }
     }
 
+    /// Mint the anonymous session cookies (`loid`, `token_v2`, …) the JSON API
+    /// requires; logged-out requests without them answer 403. Best-effort:
+    /// `None` when the priming request fails or sets no cookies.
+    async fn prime_session(&self, ctx: &ExtractorContext, id: &str) -> Option<String> {
+        let url = format!(
+            "{}/svc/shreddit/comments/{id}?seeker-session=false&render-mode=partial",
+            self.base_url
+        );
+        let req = HttpRequest::get("reddit-session", url).header("User-Agent", USER_AGENT);
+        let resp = match ctx.http.execute(req).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                tracing::debug!(error = %e, "reddit session priming failed");
+                return None;
+            }
+        };
+        if !resp.is_success() {
+            tracing::debug!(status = resp.status, "reddit session priming rejected");
+            return None;
+        }
+        session_cookie_header(&resp.headers)
+    }
+
     /// Fetch and validate the post JSON for `id`.
     async fn fetch_post(&self, ctx: &ExtractorContext, id: &str) -> Result<serde_json::Value> {
+        let cookies = self.prime_session(ctx, id).await;
         let url = format!("{}/comments/{id}.json?raw_json=1", self.base_url);
-        let req = HttpRequest::get("reddit", url)
+        let mut req = HttpRequest::get("reddit", url)
             .header("User-Agent", USER_AGENT)
             .header("Accept", "application/json");
+        if let Some(cookies) = cookies {
+            req = req.header("Cookie", cookies);
+        }
         let resp = ctx.http.execute(req).await?;
         match resp.status {
             403 => {

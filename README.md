@@ -96,7 +96,10 @@ representations become video-only and audio-only formats (merge with
 `ytdown get --merge` / [`Ytdown::download_merged`]). Crossposts and link
 posts with a Reddit video preview resolve to that video; posts linking
 external media fail with an error naming the external URL. Direct
-`v.redd.it` links are not supported — pass the post URL instead.
+`v.redd.it` links are not supported — pass the post URL instead. Reddit's
+JSON API answers 403 to a fresh logged-out client, so each extraction first
+primes an anonymous session through Reddit's `svc/shreddit` endpoint and
+sends the cookies it mints (`loid`, `token_v2`) with the post request.
 
 **TikTok** — accepted hosts: `tiktok.com` (and subdomains) plus the `vm.`/`vt.`
 share shortlink hosts.
@@ -337,9 +340,10 @@ and pass it:
 ytdown --cookies cookies.txt get "https://www.youtube.com/watch?v=..."
 ```
 
-Cookies also unlock age-restricted videos. The same remedy applies to Reddit:
-when its edge blocks a flagged network (`media unavailable: bot-check`), pass a
-`cookies.txt` exported from a browser session that has visited reddit.com.
+Cookies also unlock age-restricted videos. The same remedy applies to Reddit
+when its edge still blocks a flagged network after the automatic session
+priming (`media unavailable: bot-check`): pass a `cookies.txt` exported from a
+browser session that has visited reddit.com.
 ytdown attaches cookies only to requests whose host matches their domain (plus
 the derived `SAPISIDHASH` authorization header on youtube.com requests); treat
 the exported file like a password.

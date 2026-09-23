@@ -234,3 +234,40 @@ async fn requests_carry_a_browser_user_agent() {
     // request 404s and extraction fails.
     assert!(extractor.extract(&ctx(), &url).await.is_ok());
 }
+
+/// Logged-out Reddit answers 403 to the JSON API until a session has been
+/// primed through the shreddit endpoint; the cookies it mints must be sent
+/// with the post request.
+#[tokio::test]
+async fn primes_session_and_forwards_its_cookies() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/svc/shreddit/comments/1abc23"))
+        .and(query_param("seeker-session", "false"))
+        .and(query_param("render-mode", "partial"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("set-cookie", "loid=abc; Path=/; Secure")
+                .append_header("set-cookie", "token_v2=xyz; Path=/; HttpOnly"),
+        )
+        .mount(&server)
+        .await;
+    let body = fixture("reddit/comments_video.json").replace("https://v.redd.it", &server.uri());
+    Mock::given(method("GET"))
+        .and(path("/comments/1abc23.json"))
+        .and(|req: &wiremock::Request| {
+            req.headers
+                .get("cookie")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|c| c.contains("loid=abc") && c.contains("token_v2=xyz"))
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+        .mount(&server)
+        .await;
+    mount_mpd(&server).await;
+
+    let extractor = RedditExtractor::with_base_url(server.uri());
+    let url = url::Url::parse("https://redd.it/1abc23").unwrap();
+    // The post mock only answers when both primed cookies are present.
+    assert!(extractor.extract(&ctx(), &url).await.is_ok());
+}

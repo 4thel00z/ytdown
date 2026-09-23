@@ -5,7 +5,7 @@
 use url::Url;
 
 use crate::error::UnavailableReason;
-use crate::extractor::shared::upload_date_from_epoch;
+use crate::extractor::shared::{session_cookie_header, upload_date_from_epoch};
 use crate::extractor::{Extractor, ExtractorContext};
 use crate::transport::HttpRequest;
 use crate::types::{AudioStream, Container, Format, MediaInfo, Thumbnail, VideoInfo, VideoStream};
@@ -300,23 +300,6 @@ impl TiktokExtractor {
             }
         }
         Ok(info)
-    }
-}
-
-/// Join the `name=value` parts of every `Set-Cookie` response header into a
-/// single `Cookie` header value.
-fn session_cookie_header(headers: &[(String, String)]) -> Option<String> {
-    let pairs: Vec<&str> = headers
-        .iter()
-        .filter(|(k, _)| k.eq_ignore_ascii_case("set-cookie"))
-        .filter_map(|(_, v)| v.split(';').next())
-        .map(str::trim)
-        .filter(|s| s.contains('='))
-        .collect();
-    if pairs.is_empty() {
-        None
-    } else {
-        Some(pairs.join("; "))
     }
 }
 

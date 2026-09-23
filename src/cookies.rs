@@ -161,7 +161,7 @@ impl HttpClient for CookieTransport {
                 let https = parsed.scheme() == "https";
                 let now = unix_now();
                 if let Some(header) = self.jar.header_for(host, https, now) {
-                    req.headers.push(("Cookie".into(), header));
+                    append_cookie_header(&mut req.headers, &header);
                     // Logged-in InnerTube calls are only accepted alongside a
                     // SAPISIDHASH Authorization bound to the request origin.
                     let sapisid = self
@@ -184,6 +184,20 @@ impl HttpClient for CookieTransport {
         }
         self.inner.execute(req).await
     }
+}
+
+/// Join `cookies` onto an existing `Cookie` header, or add one; a request may
+/// already carry session cookies an extractor minted itself.
+fn append_cookie_header(headers: &mut Vec<(String, String)>, cookies: &str) {
+    let Some((_, existing)) = headers
+        .iter_mut()
+        .find(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+    else {
+        headers.push(("Cookie".into(), cookies.to_string()));
+        return;
+    };
+    existing.push_str("; ");
+    existing.push_str(cookies);
 }
 
 #[cfg(test)]
@@ -276,6 +290,39 @@ mod transport_tests {
             .execute(HttpRequest::get("test", format!("{}/x", server.uri())))
             .await
             .unwrap();
+        assert_eq!(resp.status, 200);
+    }
+
+    /// An extractor may already have attached session cookies it minted itself;
+    /// the jar's cookies join that header instead of adding a second one.
+    #[tokio::test]
+    async fn merges_jar_cookies_into_an_existing_cookie_header() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/x"))
+            .and(|req: &Request| {
+                let cookies: Vec<&str> = req
+                    .headers
+                    .get_all("cookie")
+                    .iter()
+                    .filter_map(|v| v.to_str().ok())
+                    .collect();
+                cookies == ["loid=abc; reddit_session=s3ss"]
+            })
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let jar =
+            CookieJar::parse_netscape("127.0.0.1\tFALSE\t/\tFALSE\t0\treddit_session\ts3ss\n")
+                .unwrap();
+        let client = CookieTransport::new(
+            std::sync::Arc::new(crate::transport::ReqwestClient::new(reqwest::Client::new())),
+            jar,
+        );
+        let req =
+            HttpRequest::get("test", format!("{}/x", server.uri())).header("Cookie", "loid=abc");
+        let resp = client.execute(req).await.unwrap();
         assert_eq!(resp.status, 200);
     }
 
