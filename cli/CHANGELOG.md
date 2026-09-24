@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1](https://github.com/4thel00z/ytdown/compare/ytdown-cli-v0.5.0...ytdown-cli-v0.5.1) (2026-09-24)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * ytdown bumped from 0.8.0 to 0.8.1
+
 ## [0.5.0](https://github.com/4thel00z/ytdown/compare/ytdown-cli-v0.4.0...ytdown-cli-v0.5.0) (2026-08-05)
 
 
