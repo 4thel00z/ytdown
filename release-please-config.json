@@ -4,7 +4,9 @@
     ".": {
       "release-type": "rust",
       "package-name": "ytdown",
-      "extra-files": ["ytdown-py/Cargo.toml"]
+      "extra-files": [
+        "ytdown-py/Cargo.toml"
+      ]
     },
     "cli": {
       "release-type": "rust",
@@ -12,8 +14,11 @@
     },
     "web": {
       "release-type": "node",
-      "package-name": "@4thel00z/ytdown"
+      "package-name": "@4thel00z/ytdown",
+      "component": "ytdown-web"
     }
   },
-  "plugins": ["cargo-workspace"]
+  "plugins": [
+    "cargo-workspace"
+  ]
 }
