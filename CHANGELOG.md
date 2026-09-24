@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/4thel00z/ytdown/compare/ytdown-v0.8.0...ytdown-v0.8.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **reddit:** prime an anonymous session before the JSON API call ([d80f63e](https://github.com/4thel00z/ytdown/commit/d80f63e0b23083e20c6f44aea02e2b94ea5cbf49))
+
 ## [0.8.0](https://github.com/4thel00z/ytdown/compare/ytdown-v0.7.0...ytdown-v0.8.0) (2026-08-05)
 
 
