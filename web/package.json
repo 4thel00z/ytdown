@@ -19,7 +19,7 @@
     "wasm"
   ],
   "scripts": {
-    "build:wasm": "wasm-pack build ../ytdown-wasm --target web --out-dir ../web/wasm",
+    "build:wasm": "wasm-pack build ../ytdown-wasm --target web --out-dir ../web/wasm && rm -f wasm/.gitignore",
     "build": "bun run build:wasm && tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
