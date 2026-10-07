@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.2](https://github.com/4thel00z/ytdown/compare/ytdown-v0.8.1...ytdown-v0.8.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **web:** ship the wasm core in the npm tarball ([a65d02d](https://github.com/4thel00z/ytdown/commit/a65d02d3cf3d62880eeedab3b2bc267addd29f08))
+* **web:** ship the wasm core in the npm tarball ([b9835e0](https://github.com/4thel00z/ytdown/commit/b9835e0086626d8c67dc26cd6bc895db1a08d8b3))
+
 ## [0.8.1](https://github.com/4thel00z/ytdown/compare/ytdown-v0.8.0...ytdown-v0.8.1) (2026-09-24)
 
 
